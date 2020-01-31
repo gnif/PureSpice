@@ -20,11 +20,25 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <adl/adl.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
 
-#include "spice/spice.h"
+#include <spice/spice.h>
 
 int main(int argc, char * argv[])
 {
+  char * host;
+  int port = 5900;
+
+  if (argc < 2)
+  {
+    printf("Usage: %s host [port]\n", argv[0]);
+    return -1;
+  }
+
+  host = argv[1];
+  if (argc > 2)
+    port = atoi(argv[2]);
+
   int retval = 0;
 
   if (adlInitialize() != ADL_OK)
@@ -48,9 +62,9 @@ int main(int argc, char * argv[])
   }
 
 
-  printf("attempting to connect...");
+  printf("attempting to connect to %s:%d...", host, port);
   fflush(stdout);
-  if (!spice_connect("192.168.10.50", 5900, ""))
+  if (!spice_connect(host, port, ""))
   {
     printf("spice connect failed\n");
     retval = -1;
@@ -72,9 +86,9 @@ int main(int argc, char * argv[])
   /* Create the parent window */
   ADLWindowDef winDef =
   {
-    .title       = "ADL Test",
-    .className   = "adl-test",
-    .type        = ADL_WINDOW_TYPE_NORMAL,
+    .title       = "PureSpice Test",
+    .className   = "purespice-test",
+    .type        = ADL_WINDOW_TYPE_DIALOG,
     .flags       = 0,
     .borderless  = false,
     .x           = 0  , .y = 0  ,
