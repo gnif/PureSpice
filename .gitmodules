@@ -1,0 +1,3 @@
+[submodule "test/ADL"]
+	path = test/ADL
+	url = https://github.com/gnif/ADL.git

@@ -1,7 +1,7 @@
 /*
-Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
-https://looking-glass.hostfission.com
+PureSpice - A pure C implementation of the SPICE client protocol
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+https://github.com/gnif/PureSpice
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software

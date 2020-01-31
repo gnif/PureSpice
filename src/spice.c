@@ -1,7 +1,7 @@
 /*
-Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
-https://looking-glass.hostfission.com
+PureSpice - A pure C implementation of the SPICE client protocol
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+https://github.com/gnif/PureSpice
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -18,8 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "spice/spice.h"
-#include "common/debug.h"
-#include "common/locking.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -27,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -42,23 +41,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "messages.h"
 #include "rsa.h"
 
-#ifdef DEBUG_SPICE_MOUSE
-  #define DEBUG_MOUSE(fmt, args...) DEBUG_PRINT("[M]", fmt, ##args)
-#else
-  #define DEBUG_MOUSE(fmt, args...) do {} while(0)
-#endif
+#define SPICE_LOCK_INIT(x) \
+  atomic_flag_clear(&(x))
 
-#ifdef DEBUG_SPICE_KEYBOARD
-  #define DEBUG_KEYBOARD(fmt, args...) DEBUG_PRINT("[K]", fmt, ##args)
-#else
-  #define DEBUG_KEYBOARD(fmt, args...) do {} while(0)
-#endif
+#define SPICE_LOCK(x) \
+  while(atomic_flag_test_and_set_explicit(&(x), memory_order_acquire)) { ; }
 
-#ifdef DEBUG_SPICE_CLIPBOARD
-  #define DEBUG_CLIPBOARD(fmt, args...) DEBUG_PRINT("[C]", fmt, ##args)
-#else
-  #define DEBUG_CLIPBOARD(fmt, args...) do {} while(0)
-#endif
+#define SPICE_UNLOCK(x) \
+  atomic_flag_clear_explicit(&(x), memory_order_release);
 
 // we don't really need flow control because we are all local
 // instead do what the spice-gtk library does and provide the largest
@@ -83,9 +73,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
       sizeof(SpiceMiniDataHeader)); \
   ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
-  LG_LOCK((channel)->lock); \
+  SPICE_LOCK((channel)->lock); \
   const ssize_t wrote = spice_write_nl((channel), header, *sz); \
-  LG_UNLOCK((channel)->lock); \
+  SPICE_UNLOCK((channel)->lock); \
   wrote == *sz; \
 })
 
@@ -103,14 +93,14 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 // internal structures
 struct SpiceChannel
 {
-  bool     connected;
-  bool     ready;
-  bool     initDone;
-  uint8_t  channelType;
-  int      socket;
-  uint32_t ackFrequency;
-  uint32_t ackCount;
-  LG_Lock  lock;
+  bool        connected;
+  bool        ready;
+  bool        initDone;
+  uint8_t     channelType;
+  int         socket;
+  uint32_t    ackFrequency;
+  uint32_t    ackCount;
+  atomic_flag lock;
 };
 
 struct SpiceKeyboard
@@ -215,7 +205,6 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     spice.family = AF_UNIX;
     spice.addr.un.sun_family = spice.family;
     strncpy(spice.addr.un.sun_path, host, sizeof(spice.addr.un.sun_path) - 1);
-    DEBUG_INFO("Remote: %s", host);
   }
   else
   {
@@ -223,15 +212,11 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     inet_pton(spice.family, host, &spice.addr.in.sin_addr);
     spice.addr.in.sin_family = spice.family;
     spice.addr.in.sin_port   = htons(port);
-    DEBUG_INFO("Remote: %s:%u", host, port);
   }
 
   spice.channelID = 0;
   if (!spice_connect_channel(&spice.scMain))
-  {
-    DEBUG_ERROR("connect main channel failed");
     return false;
-  }
 
   return true;
 }
@@ -278,10 +263,7 @@ bool spice_process(int timeout)
 
   int rc = select(FD_SETSIZE, &readSet, NULL, NULL, &tv);
   if (rc < 0)
-  {
-    DEBUG_ERROR("select failure");
     return false;
-  }
 
   for(int i = 0; i < FD_SETSIZE; ++i)
     if (FD_ISSET(i, &readSet))
@@ -291,34 +273,22 @@ bool spice_process(int timeout)
         if (spice_on_main_channel_read())
         {
           if (spice.scMain.connected && !spice_process_ack(&spice.scMain))
-          {
-            DEBUG_ERROR("failed to process ack on main channel");
             return false;
-          }
           continue;
         }
         else
-        {
-          DEBUG_ERROR("failed to perform read on main channel");
           return false;
-        }
       }
 
       if (spice.scInputs.connected && i == spice.scInputs.socket)
       {
         if (!spice_process_ack(&spice.scInputs))
-        {
-          DEBUG_ERROR("failed to process ack on inputs channel");
           return false;
-        }
 
         if (spice_on_inputs_channel_read())
           continue;
         else
-        {
-          DEBUG_ERROR("failed to perform read on inputs channel");
           return false;
-        }
       }
     }
 
@@ -348,15 +318,7 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
 {
   *handled = false;
   if (!spice_read_nl(channel, header, sizeof(SpiceMiniDataHeader)))
-  {
-    DEBUG_ERROR("read failure");
     return false;
-  }
-
-//#if 0
-  DEBUG_PROTO("socket: %d, type: %2u, size %6u",
-      channel->socket, header->type, header->size);
-//#endif
 
   if (!channel->initDone)
     return true;
@@ -366,16 +328,12 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
     case SPICE_MSG_MIGRATE:
     case SPICE_MSG_MIGRATE_DATA:
     {
-      DEBUG_PROTO("SPICE_MSG_MIGRATE_DATA");
-
       *handled = true;
-      DEBUG_WARN("migration is not supported");
       return false;
     }
 
     case SPICE_MSG_SET_ACK:
     {
-      DEBUG_INFO("SPICE_MSG_SET_ACK");
       *handled = true;
 
       SpiceMsgSetAck in;
@@ -393,7 +351,6 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
 
     case SPICE_MSG_PING:
     {
-      DEBUG_PROTO("SPICE_MSG_PING");
       *handled = true;
 
       SpiceMsgPing in;
@@ -402,12 +359,7 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
 
       const int discard = header->size - sizeof(in);
       if (!spice_discard_nl(channel, discard))
-      {
-        DEBUG_ERROR("failed discarding enough bytes (%d) from the ping packet", discard);
         return false;
-      }
-      else
-        DEBUG_PROTO("discard %d", discard);
 
       SpiceMsgcPong * out =
         SPICE_PACKET(SPICE_MSGC_PONG, SpiceMsgcPong, 0);
@@ -421,13 +373,11 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
     case SPICE_MSG_DISCONNECTING    :
     {
       *handled = true;
-      DEBUG_FIXME("ignored wait-for-channels or disconnect message");
       return false;
     }
 
     case SPICE_MSG_NOTIFY:
     {
-      DEBUG_PROTO("SPICE_MSG_NOTIFY");
       SpiceMsgNotify in;
       if (!spice_read_nl(channel, &in, sizeof(in)))
         return false;
@@ -436,7 +386,6 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
       if (!spice_read_nl(channel, msg, in.message_len+1))
         return false;
 
-      DEBUG_INFO("notify message: %s", msg);
       *handled = true;
       return true;
     }
@@ -456,7 +405,6 @@ bool spice_on_main_channel_read()
 
   if (!spice_on_common_read(channel, &header, &handled))
   {
-    DEBUG_ERROR("read failure");
     return false;
   }
 
@@ -468,11 +416,8 @@ bool spice_on_main_channel_read()
     if (header.type != SPICE_MSG_MAIN_INIT)
     {
       spice_disconnect();
-      DEBUG_ERROR("expected main init message but got type %u", header.type);
       return false;
     }
-
-    DEBUG_PROTO("SPICE_MSG_MAIN_INIT");
 
     channel->initDone = true;
     SpiceMsgMainInit msg;
@@ -489,21 +434,16 @@ bool spice_on_main_channel_read()
     if (spice.hasAgent && !spice_agent_connect())
     {
       spice_disconnect();
-      DEBUG_ERROR("failed to connect to spice agent");
       return false;
     }
 
     if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT && !spice_mouse_mode(false))
-    {
-      DEBUG_ERROR("failed to set mouse mode");
       return false;
-    }
 
     void * packet = SPICE_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, void, 0);
     if (!SPICE_SEND_PACKET_LOCKED(channel, packet))
     {
       spice_disconnect();
-      DEBUG_ERROR("failed to ask for channel list");
       return false;
     }
 
@@ -512,12 +452,9 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_CHANNELS_LIST");
-
     SpiceMainChannelsList msg;
     if (!spice_read_nl(channel, &msg, sizeof(msg)))
     {
-      DEBUG_ERROR("Failed to read channel list msg");
       spice_disconnect();
       return false;
     }
@@ -526,26 +463,22 @@ bool spice_on_main_channel_read()
     SpiceChannelID channels[msg.num_of_channels];
     if (!spice_read_nl(channel, &channels, msg.num_of_channels * sizeof(SpiceChannelID)))
     {
-      DEBUG_ERROR("Failed to read channel list vector");
       spice_disconnect();
       return false;
     }
 
     for(int i = 0; i < msg.num_of_channels; ++i)
     {
-      DEBUG_PROTO("channel %d = %u", i, channels[i].type);
       if (channels[i].type == SPICE_CHANNEL_INPUTS)
       {
         if (spice.scInputs.connected)
         {
-          DEBUG_ERROR("inputs channel already connected");
           spice_disconnect();
           return false;
         }
 
         if (!spice_connect_channel(&spice.scInputs))
         {
-          DEBUG_ERROR("failed to connect inputs channel");
           spice_disconnect();
           return false;
         }
@@ -557,12 +490,9 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_CONNECTED");
-
     spice.hasAgent = true;
     if (!spice_agent_connect())
     {
-      DEBUG_ERROR("failed to connect to spice agent");
       spice_disconnect();
       return false;
     }
@@ -571,12 +501,9 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS");
-
     uint32_t num_tokens;
     if (!spice_read_nl(channel, &num_tokens, sizeof(num_tokens)))
     {
-      DEBUG_ERROR("failed to read agent tokens");
       spice_disconnect();
       return false;
     }
@@ -585,7 +512,6 @@ bool spice_on_main_channel_read()
     spice.serverTokens = num_tokens;
     if (!spice_agent_connect())
     {
-      DEBUG_ERROR("failed to connect to spice agent");
       spice_disconnect();
       return false;
     }
@@ -594,17 +520,13 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_DISCONNECTED)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_DISCONNECTED");
-
     uint32_t error;
     if (!spice_read_nl(channel, &error, sizeof(error)))
     {
-      DEBUG_ERROR("failed to read agent disconnect error code");
       spice_disconnect();
       return false;
     }
 
-    DEBUG_INFO("Spice agent disconnected, error: %u", error);
     spice.hasAgent = false;
 
     if (spice.cbBuffer)
@@ -620,18 +542,14 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_DATA)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_DATA");
-
     if (!spice.hasAgent)
     {
-      DEBUG_WARN("recieved agent data when the agent is yet to be started");
       spice_discard_nl(channel, header.size);
       return true;
     }
 
     if (!spice_agent_process(header.size))
     {
-      DEBUG_ERROR("failed to process spice agent message");
       spice_disconnect();
       return false;
     }
@@ -640,12 +558,9 @@ bool spice_on_main_channel_read()
 
   if (header.type == SPICE_MSG_MAIN_AGENT_TOKEN)
   {
-    DEBUG_PROTO("SPICE_MSG_MAIN_AGENT_TOKEN");
-
     uint32_t num_tokens;
     if (!spice_read_nl(channel, &num_tokens, sizeof(num_tokens)))
     {
-      DEBUG_ERROR("failed to read agent tokens");
       spice_disconnect();
       return false;
     }
@@ -654,7 +569,6 @@ bool spice_on_main_channel_read()
     return true;
   }
 
-  DEBUG_WARN("main channel unhandled message type %u", header.type);
   spice_discard_nl(channel, header.size);
   return true;
 }
@@ -669,10 +583,7 @@ bool spice_on_inputs_channel_read()
   bool handled;
 
   if (!spice_on_common_read(channel, &header, &handled))
-  {
-    DEBUG_ERROR("read failure");
     return false;
-  }
 
   if (handled)
     return true;
@@ -681,13 +592,8 @@ bool spice_on_inputs_channel_read()
   {
     case SPICE_MSG_INPUTS_INIT:
     {
-      DEBUG_PROTO("SPICE_MSG_INPUTS_INIT");
-
       if (channel->initDone)
-      {
-        DEBUG_ERROR("input init message already done");
         return false;
-      }
 
       channel->initDone = true;
 
@@ -700,7 +606,6 @@ bool spice_on_inputs_channel_read()
 
     case SPICE_MSG_INPUTS_KEY_MODIFIERS:
     {
-      DEBUG_PROTO("SPICE_MSG_INPUTS_KEY_MODIFIERS");
       SpiceMsgInputsInit in;
       if (!spice_read_nl(channel, &in, sizeof(in)))
         return false;
@@ -711,18 +616,13 @@ bool spice_on_inputs_channel_read()
 
     case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
     {
-      DEBUG_PROTO("SPICE_MSG_INPUTS_MOUSE_MOTION_ACK");
       const int count = __sync_add_and_fetch(&spice.mouse.sentCount, SPICE_INPUT_MOTION_ACK_BUNCH);
       if (count < 0)
-      {
-        DEBUG_ERROR("comms failure, too many mouse motion ACKs recieved");
         return false;
-      }
       return true;
     }
   }
 
-  DEBUG_WARN("inputs channel unhandled message type %u", header.type);
   spice_discard_nl(channel, header.size);
   return true;
 }
@@ -735,7 +635,7 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
 
-  LG_LOCK_INIT(channel->lock);
+  SPICE_LOCK_INIT(channel->lock);
 
   size_t addrSize;
   switch(spice.family)
@@ -753,7 +653,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
       break;
 
     default:
-      DEBUG_ERROR("Unsupported socket family");
       return false;
   }
 
@@ -770,7 +669,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
   if (connect(channel->socket, &spice.addr.addr, addrSize) == -1)
   {
-    DEBUG_ERROR("socket connect failure");
     close(channel->socket);
     return false;
   }
@@ -812,14 +710,12 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
   if (!spice_write_nl(channel, &p, sizeof(p)))
   {
-    DEBUG_ERROR("failed to write the initial payload");
     spice_disconnect_channel(channel);
     return false;
   }
 
   if (!spice_read_nl(channel, &p.header, sizeof(p.header)))
   {
-    DEBUG_ERROR("failed to read SpiceLinkHeader");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -827,14 +723,12 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   if (p.header.magic         != SPICE_MAGIC ||
       p.header.major_version != SPICE_VERSION_MAJOR)
   {
-    DEBUG_ERROR("invalid or unsupported protocol version");
     spice_disconnect_channel(channel);
     return false;
   }
 
   if (p.header.size < sizeof(SpiceLinkReply))
   {
-    DEBUG_ERROR("reported data size too small");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -842,14 +736,12 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   SpiceLinkReply reply;
   if (!spice_read_nl(channel, &reply, sizeof(reply)))
   {
-    DEBUG_ERROR("failed to read SpiceLinkReply");
     spice_disconnect_channel(channel);
     return false;
   }
 
   if (reply.error != SPICE_LINK_ERR_OK)
   {
-    DEBUG_ERROR("server replied with error %u", reply.error);
     spice_disconnect_channel(channel);
     return false;
   }
@@ -861,7 +753,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
       !spice_read_nl(channel, &capsChannel, sizeof(capsChannel))
      )
   {
-    DEBUG_ERROR("failed to read the capabilities");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -870,7 +761,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
   if (!spice_write_nl(channel, &auth, sizeof(auth)))
   {
-    DEBUG_ERROR("failed to write the auth mechanism");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -878,7 +768,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   struct spice_password pass;
   if (!spice_rsa_encrypt_password(reply.pub_key, spice.password, &pass))
   {
-    DEBUG_ERROR("failed to encrypt the password");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -886,7 +775,6 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   if (!spice_write_nl(channel, pass.data, pass.size))
   {
     spice_rsa_free_password(&pass);
-    DEBUG_ERROR("failed to write encrypted data");
     spice_disconnect_channel(channel);
     return false;
   }
@@ -896,14 +784,12 @@ bool spice_connect_channel(struct SpiceChannel * channel)
   uint32_t linkResult;
   if (!spice_read_nl(channel, &linkResult, sizeof(linkResult)))
   {
-    DEBUG_ERROR("failed to read SpiceLinkResult");
     spice_disconnect_channel(channel);
     return false;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
-    DEBUG_ERROR("connect code error %u", linkResult);
     spice_disconnect_channel(channel);
     return false;
   }
@@ -929,22 +815,16 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
     close(channel->socket);
   }
   channel->connected = false;
-  LG_LOCK_FREE(channel->lock);
 }
 
 // ============================================================================
 
 bool spice_agent_connect()
 {
-  DEBUG_INFO("Spice agent available, sending start");
-
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   *packet = SPICE_AGENT_TOKENS_MAX;
   if (!SPICE_SEND_PACKET_LOCKED(&spice.scMain, packet))
-  {
-    DEBUG_ERROR("failed to send agent start message");
     return false;
-  }
 
   if (!spice_agent_send_caps(true))
     return false;
@@ -961,7 +841,6 @@ bool spice_agent_process(uint32_t dataSize)
     const uint32_t r = spice.cbRemain > dataSize ? dataSize : spice.cbRemain;
     if (!spice_read_nl(&spice.scMain, spice.cbBuffer + spice.cbSize, r))
     {
-      DEBUG_ERROR("failed to read the clipboard data");
       free(spice.cbBuffer);
       spice.cbBuffer = NULL;
       spice.cbRemain = 0;
@@ -989,17 +868,11 @@ bool spice_agent_process(uint32_t dataSize)
   #pragma pack(pop)
 
   if (!spice_read_nl(&spice.scMain, &msg, sizeof(msg)))
-  {
-    DEBUG_ERROR("failed to read spice agent message");
     return false;
-  }
   dataSize -= sizeof(msg);
 
   if (msg.protocol != VD_AGENT_PROTOCOL)
-  {
-    DEBUG_ERROR("invalid or unknown spice agent protocol");
     return false;
-  }
 
   switch(msg.type)
   {
@@ -1010,7 +883,6 @@ bool spice_agent_process(uint32_t dataSize)
 
       if (!spice_read_nl(&spice.scMain, caps, msg.size))
       {
-        DEBUG_ERROR("failed to read agent message payload");
         free(caps);
         return false;
       }
@@ -1019,9 +891,6 @@ bool spice_agent_process(uint32_t dataSize)
       spice.cbSupported  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) ||
                            VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_SELECTION);
       spice.cbSelection  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_SELECTION);
-
-      if (spice.cbSupported)
-        DEBUG_INFO("clipboard capability detected");
 
       if (caps->request && !spice_agent_send_caps(false))
       {
@@ -1043,17 +912,13 @@ bool spice_agent_process(uint32_t dataSize)
       {
         struct Selection selection;
         if (!spice_read_nl(&spice.scMain, &selection, sizeof(selection)))
-        {
-          DEBUG_ERROR("failed to read the clipboard selection");
           return false;
-        }
         remaining -= sizeof(selection);
         dataSize  -= sizeof(selection);
       }
 
       if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
       {
-        DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_RELEASE");
         spice.cbAgentGrabbed = false;
         if (spice.cbReleaseFn)
           spice.cbReleaseFn();
@@ -1064,21 +929,14 @@ bool spice_agent_process(uint32_t dataSize)
       {
         uint32_t type;
         if (!spice_read_nl(&spice.scMain, &type, sizeof(type)))
-        {
-          DEBUG_ERROR("failed to read the clipboard data type");
           return false;
-        }
         remaining -= sizeof(type);
         dataSize  -= sizeof(type);
 
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
-          DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD");
           if (spice.cbBuffer)
-          {
-            DEBUG_ERROR("cbBuffer was never freed");
             return false;
-          }
 
           spice.cbSize     = 0;
           spice.cbRemain   = remaining;
@@ -1087,7 +945,6 @@ bool spice_agent_process(uint32_t dataSize)
 
           if (!spice_read_nl(&spice.scMain, spice.cbBuffer, r))
           {
-            DEBUG_ERROR("failed to read the clipboard data");
             free(spice.cbBuffer);
             spice.cbBuffer = NULL;
             spice.cbRemain = 0;
@@ -1105,7 +962,6 @@ bool spice_agent_process(uint32_t dataSize)
         }
         else
         {
-          DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_REQUEST");
           if (spice.cbRequestFn)
             spice.cbRequestFn(agent_type_to_spice_type(type));
           return true;
@@ -1113,16 +969,12 @@ bool spice_agent_process(uint32_t dataSize)
       }
       else
       {
-        DEBUG_CLIPBOARD("VD_AGENT_CLIPBOARD_GRAB");
         if (remaining == 0)
           return true;
 
         uint32_t *types = malloc(remaining);
         if (!spice_read_nl(&spice.scMain, types, remaining))
-        {
-          DEBUG_ERROR("failed to read the clipboard grab types");
           return false;
-        }
 
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
@@ -1133,7 +985,6 @@ bool spice_agent_process(uint32_t dataSize)
         if (spice.cbSelection)
         {
           // Windows doesnt support this, so until it's needed there is no point messing with it
-          DEBUG_ERROR("Fixme!");
           return false;
         }
 
@@ -1146,7 +997,6 @@ bool spice_agent_process(uint32_t dataSize)
     }
   }
 
-  DEBUG_WARN("unknown agent message type %d", msg.type);
   spice_discard_nl(&spice.scMain, msg.size);
   return true;
 }
@@ -1179,7 +1029,6 @@ bool spice_agent_send_caps(bool request)
 
   if (!spice_agent_write_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, caps, capsSize))
   {
-    DEBUG_ERROR("failed to send agent capabilities");
     free(caps);
     return false;
   }
@@ -1204,12 +1053,11 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
   msg->opaque   = 0;
   msg->size     = size;
 
-  LG_LOCK(spice.scMain.lock);
+  SPICE_LOCK(spice.scMain.lock);
 
   if (!SPICE_SEND_PACKET(&spice.scMain, msg))
   {
-    LG_UNLOCK(spice.scMain.lock);
-    DEBUG_ERROR("failed to write agent data header");
+    SPICE_UNLOCK(spice.scMain.lock);
     return false;
   }
 
@@ -1230,8 +1078,7 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 
     if (!ok)
     {
-      LG_UNLOCK(spice.scMain.lock);
-      DEBUG_ERROR("failed to write agent data payload");
+      SPICE_UNLOCK(spice.scMain.lock);
       return false;
     }
 
@@ -1240,7 +1087,7 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
     toWrite = size > VD_AGENT_MAX_DATA_SIZE ? VD_AGENT_MAX_DATA_SIZE : size;
   }
 
-  LG_UNLOCK(spice.scMain.lock);
+  SPICE_UNLOCK(spice.scMain.lock);
   return true;
 }
 
@@ -1249,22 +1096,12 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 ssize_t spice_write_nl(const struct SpiceChannel * channel, const void * buffer, const ssize_t size)
 {
   if (!channel->connected)
-  {
-    DEBUG_ERROR("not connected");
     return -1;
-  }
 
   if (!buffer)
-  {
-    DEBUG_ERROR("invalid buffer argument supplied");
     return -1;
-  }
 
-  ssize_t len = send(channel->socket, buffer, size, 0);
-  if (len != size)
-    DEBUG_WARN("incomplete write");
-
-  return len;
+  return send(channel->socket, buffer, size, 0);
 }
 
 // ============================================================================
@@ -1272,16 +1109,10 @@ ssize_t spice_write_nl(const struct SpiceChannel * channel, const void * buffer,
 bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssize_t size)
 {
   if (!channel->connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   if (!buffer)
-  {
-    DEBUG_ERROR("invalid buffer argument supplied");
     return false;
-  }
 
   size_t    left = size;
   uint8_t * buf  = (uint8_t *)buffer;
@@ -1289,11 +1120,7 @@ bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssi
   {
     ssize_t len = read(channel->socket, buf, left);
     if (len <= 0)
-    {
-      if (len == 0)
-        DEBUG_ERROR("remote end closd connection after %ld byte(s)", size - left);
       return false;
-    }
     left -= len;
     buf  += len;
   }
@@ -1312,8 +1139,6 @@ bool spice_discard_nl(const struct SpiceChannel * channel, ssize_t size)
     size_t len = read(channel->socket, c, left > 8192 ? 8192 : left);
     if (len <= 0)
     {
-      if (len == 0)
-        DEBUG_ERROR("remote end closed connection after %ld byte(s)", size - left);
       free(c);
       return false;
     }
@@ -1328,12 +1153,8 @@ bool spice_discard_nl(const struct SpiceChannel * channel, ssize_t size)
 
 bool spice_key_down(uint32_t code)
 {
-  DEBUG_KEYBOARD("%u", code);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   if (code > 0x100)
     code = 0xe0 | ((code - 0x100) << 8);
@@ -1348,12 +1169,8 @@ bool spice_key_down(uint32_t code)
 
 bool spice_key_up(uint32_t code)
 {
-  DEBUG_KEYBOARD("%u", code);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   if (code < 0x100)
     code |= 0x80;
@@ -1370,12 +1187,8 @@ bool spice_key_up(uint32_t code)
 
 bool spice_mouse_mode(bool server)
 {
-  DEBUG_MOUSE("%s", server ? "server" : "client");
   if (!spice.scMain.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   SpiceMsgcMainMouseModeRequest * msg = SPICE_PACKET(
     SPICE_MSGC_MAIN_MOUSE_MODE_REQUEST,
@@ -1389,12 +1202,8 @@ bool spice_mouse_mode(bool server)
 
 bool spice_mouse_position(uint32_t x, uint32_t y)
 {
-  DEBUG_MOUSE("x=%u, y=%u", x, y);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   SpiceMsgcMousePosition * msg =
     SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_POSITION, SpiceMsgcMousePosition, 0);
@@ -1412,12 +1221,8 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
 
 bool spice_mouse_motion(int32_t x, int32_t y)
 {
-  DEBUG_MOUSE("x=%d, y=%d", x, y);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   SpiceMsgcMouseMotion * msg =
     SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion, 0);
@@ -1434,12 +1239,8 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 
 bool spice_mouse_press(uint32_t button)
 {
-  DEBUG_MOUSE("%u", button);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   switch(button)
   {
@@ -1461,12 +1262,8 @@ bool spice_mouse_press(uint32_t button)
 
 bool spice_mouse_release(uint32_t button)
 {
-  DEBUG_MOUSE("%u", button);
   if (!spice.scInputs.connected)
-  {
-    DEBUG_ERROR("not connected");
     return false;
-  }
 
   switch(button)
   {
@@ -1496,7 +1293,6 @@ static uint32_t spice_type_to_agent_type(SpiceDataType type)
     case SPICE_DATA_TIFF: return VD_AGENT_CLIPBOARD_IMAGE_TIFF; break;
     case SPICE_DATA_JPEG: return VD_AGENT_CLIPBOARD_IMAGE_JPG ; break;
     default:
-      DEBUG_ERROR("unsupported spice data type specified");
       return VD_AGENT_CLIPBOARD_NONE;
   }
 }
@@ -1511,7 +1307,6 @@ static SpiceDataType agent_type_to_spice_type(uint32_t type)
     case VD_AGENT_CLIPBOARD_IMAGE_TIFF: return SPICE_DATA_TIFF; break;
     case VD_AGENT_CLIPBOARD_IMAGE_JPG : return SPICE_DATA_JPEG; break;
     default:
-      DEBUG_ERROR("unsupported agent data type specified");
       return SPICE_DATA_NONE;
   }
 }
@@ -1523,23 +1318,14 @@ bool spice_clipboard_request(SpiceDataType type)
   VDAgentClipboardRequest req;
 
   if (!spice.cbAgentGrabbed)
-  {
-    DEBUG_ERROR("the agent has not grabbed any data yet");
     return false;
-  }
 
   if (type != spice.cbType)
-  {
-    DEBUG_ERROR("data type requested doesn't match reported data type");
     return false;
-  }
 
   req.type = spice_type_to_agent_type(type);
   if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
-  {
-    DEBUG_ERROR("failed to request clipboard data");
     return false;
-  }
 
   return true;
 }
@@ -1549,10 +1335,7 @@ bool spice_clipboard_request(SpiceDataType type)
 bool spice_set_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData cbDataFn, SpiceClipboardRelease cbReleaseFn, SpiceClipboardRequest cbRequestFn)
 {
   if ((cbNoticeFn && !cbDataFn) || (cbDataFn && !cbNoticeFn))
-  {
-    DEBUG_ERROR("clipboard callback notice and data callbacks must be specified");
     return false;
-  }
 
   spice.cbNoticeFn  = cbNoticeFn;
   spice.cbDataFn    = cbDataFn;
@@ -1567,10 +1350,7 @@ bool spice_set_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData 
 bool spice_clipboard_grab(SpiceDataType type)
 {
   if (type == SPICE_DATA_NONE)
-  {
-    DEBUG_ERROR("grab type is invalid");
     return false;
-  }
 
   if (spice.cbSelection)
   {
@@ -1578,10 +1358,7 @@ bool spice_clipboard_grab(SpiceDataType type)
     ((uint32_t*)req)[1] = spice_type_to_agent_type(type);
 
     if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_GRAB, req, sizeof(req)))
-    {
-      DEBUG_ERROR("failed to grab the clipboard");
       return false;
-    }
 
     spice.cbClientGrabbed = true;
     return true;
@@ -1589,10 +1366,7 @@ bool spice_clipboard_grab(SpiceDataType type)
 
   uint32_t req = spice_type_to_agent_type(type);
   if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_GRAB, &req, sizeof(req)))
-  {
-    DEBUG_ERROR("failed to grab the clipboard");
     return false;
-  }
 
   spice.cbClientGrabbed = true;
   return true;
@@ -1610,20 +1384,14 @@ bool spice_clipboard_release()
   {
     uint8_t req[4] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
     if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_RELEASE, req, sizeof(req)))
-    {
-      DEBUG_ERROR("failed to release the clipboard");
       return false;
-    }
 
     spice.cbClientGrabbed = false;
     return true;
   }
 
    if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_RELEASE, NULL, 0))
-   {
-     DEBUG_ERROR("failed to release the clipboard");
      return false;
-   }
 
    spice.cbClientGrabbed = false;
    return true;
@@ -1655,7 +1423,6 @@ bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
 
   if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD, buffer, bufSize))
   {
-    DEBUG_ERROR("failed to write the clipboard data");
     free(buffer);
     return false;
   }

@@ -1,7 +1,7 @@
 /*
-Looking Glass - KVM FrameRelay (KVMFR) Client
-Copyright (C) 2017-2019 Geoffrey McRae <geoff@hostfission.com>
-https://looking-glass.hostfission.com
+PureSpice - A pure C implementation of the SPICE client protocol
+Copyright (C) 2017-2020 Geoffrey McRae <geoff@hostfission.com>
+https://github.com/gnif/PureSpice
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -18,7 +18,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "rsa.h"
-#include "common/debug.h"
 
 #include <spice/protocol.h>
 #include <malloc.h>
@@ -93,10 +92,7 @@ static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, siz
 static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, unsigned int len)
 {
   if (len + SHA1_HASH_LEN * 2 + 2 > key_size)
-  {
-    DEBUG_ERROR("Message too long");
     return false;
-  }
 
   struct
   {
@@ -133,10 +129,7 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
 #if defined(USE_OPENSSL)
   BIO *bioKey = BIO_new(BIO_s_mem());
   if (!bioKey)
-  {
-    DEBUG_ERROR("failed to allocate bioKey");
     return false;
-  }
 
   BIO_write(bioKey, pub_key, SPICE_TICKET_PUBKEY_BYTES);
   EVP_PKEY *rsaKey = d2i_PUBKEY_bio(bioKey, NULL);
@@ -157,7 +150,6 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
     result->size = 0;
     result->data = NULL;
 
-    DEBUG_ERROR("rsa public encrypt failed");
     EVP_PKEY_free(rsaKey);
     BIO_free(bioKey);
     return false;
@@ -184,10 +176,7 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
       && asn1_der_decode_bitstring_last(&der))
   {
     if (j.length != 9)
-    {
-      DEBUG_ERROR("Invalid key, not RSA");
       return false;
-    }
 
     if (asn1_der_iterator_next(&j) == ASN1_ITERATOR_PRIMITIVE
         && j.type == ASN1_NULL
@@ -197,7 +186,6 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
       rsa_public_key_init(&pub);
       if (!rsa_public_key_from_der_iterator(&pub, 0, &der))
       {
-        DEBUG_ERROR("Unable to load public key from DER iterator");
         rsa_public_key_clear(&pub);
         return false;
       }
