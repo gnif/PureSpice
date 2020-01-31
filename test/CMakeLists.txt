@@ -22,5 +22,5 @@ add_subdirectory("ADL" "${CMAKE_BINARY_DIR}/ADL")
 add_executable(${TARGET_NAME} ${SOURCES})
 target_link_libraries(${TARGET_NAME}
 	adl
-	spice
+	purespice
 )
