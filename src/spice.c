@@ -256,8 +256,12 @@ bool spice_process(int timeout)
   fd_set readSet;
   FD_ZERO(&readSet);
 
+  bool mainConnected   = false;
+  bool inputsConnected = false;
+
   if (spice.scMain.connected)
   {
+    mainConnected = true;
     FD_SET(spice.scMain.socket, &readSet);
     if (spice.scMain.socket > fds)
       fds = spice.scMain.socket;
@@ -265,6 +269,7 @@ bool spice_process(int timeout)
 
   if (spice.scInputs.connected)
   {
+    inputsConnected = true;
     FD_SET(spice.scInputs.socket, &readSet);
     if (spice.scInputs.socket > fds)
       fds = spice.scMain.socket;
@@ -309,6 +314,12 @@ bool spice_process(int timeout)
 
   spice.cbAgentGrabbed  = false;
   spice.cbClientGrabbed = false;
+
+  if (inputsConnected)
+    close(spice.scInputs.socket);
+
+  if (mainConnected)
+    close(spice.scMain.socket);
 
   return false;
 }
@@ -1150,7 +1161,6 @@ bool spice_read_nl(struct SpiceChannel * channel, void * buffer, const ssize_t s
     if (len <= 0)
     {
       channel->connected = false;
-      close(channel->socket);
       return true;
     }
     left -= len;
