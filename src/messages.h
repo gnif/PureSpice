@@ -132,6 +132,12 @@ typedef struct SpiceMsgcMousePress
 SpiceMsgcMousePress,
 SpiceMsgcMouseRelease;
 
+typedef struct SpiceMsgcDisconnecting
+{
+  uint64_t time_stamp;
+  uint32_t reason;
+}
+SpiceMsgcDisconnecting;
 
 // spice is missing these defines, the offical reference library incorrectly uses the VD defines
 #define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)

@@ -26,6 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+#include <assert.h>
+#include <time.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -189,9 +191,18 @@ static SpiceDataType agent_type_to_spice_type(uint32_t type);
 bool spice_agent_write_msg (uint32_t type, const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
-bool    spice_read_nl   (const struct SpiceChannel * channel, void * buffer, const ssize_t size);
+bool    spice_read_nl   (      struct SpiceChannel * channel, void * buffer, const ssize_t size);
 ssize_t spice_write_nl  (const struct SpiceChannel * channel, const void * buffer, const ssize_t size);
 bool    spice_discard_nl(const struct SpiceChannel * channel, ssize_t size);
+
+// ============================================================================
+
+static uint64_t get_timestamp()
+{
+  struct timespec time;
+  assert(clock_gettime(CLOCK_MONOTONIC, &time) == 0);
+  return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
+}
 
 // ============================================================================
 
@@ -227,17 +238,6 @@ void spice_disconnect()
 {
   spice_disconnect_channel(&spice.scMain  );
   spice_disconnect_channel(&spice.scInputs);
-
-  spice.sessionID = 0;
-
-  if (spice.cbBuffer)
-    free(spice.cbBuffer);
-  spice.cbBuffer = NULL;
-  spice.cbRemain = 0;
-  spice.cbSize   = 0;
-
-  spice.cbAgentGrabbed  = false;
-  spice.cbClientGrabbed = false;
 }
 
 // ============================================================================
@@ -252,47 +252,65 @@ bool spice_ready()
 
 bool spice_process(int timeout)
 {
+  int fds = 0;
   fd_set readSet;
   FD_ZERO(&readSet);
-  FD_SET(spice.scMain.socket  , &readSet);
-  FD_SET(spice.scInputs.socket, &readSet);
+
+  if (spice.scMain.connected)
+  {
+    FD_SET(spice.scMain.socket, &readSet);
+    if (spice.scMain.socket > fds)
+      fds = spice.scMain.socket;
+  }
+
+  if (spice.scInputs.connected)
+  {
+    FD_SET(spice.scInputs.socket, &readSet);
+    if (spice.scInputs.socket > fds)
+      fds = spice.scMain.socket;
+  }
 
   struct timeval tv;
   tv.tv_sec  = timeout / 1000;
   tv.tv_usec = (timeout % 1000) * 1000;
 
-  int rc = select(FD_SETSIZE, &readSet, NULL, NULL, &tv);
+  int rc = select(fds + 1, &readSet, NULL, NULL, &tv);
   if (rc < 0)
     return false;
 
-  for(int i = 0; i < FD_SETSIZE; ++i)
-    if (FD_ISSET(i, &readSet))
-    {
-      if (i == spice.scMain.socket)
-      {
-        if (spice_on_main_channel_read())
-        {
-          if (spice.scMain.connected && !spice_process_ack(&spice.scMain))
-            return false;
-          continue;
-        }
-        else
-          return false;
-      }
+  if (spice.scMain.connected && FD_ISSET(spice.scMain.socket, &readSet))
+  {
+    if (!spice_on_main_channel_read())
+      return false;
 
-      if (spice.scInputs.connected && i == spice.scInputs.socket)
-      {
-        if (!spice_process_ack(&spice.scInputs))
-          return false;
+    if (spice.scMain.connected && !spice_process_ack(&spice.scMain))
+      return false;
+  }
 
-        if (spice_on_inputs_channel_read())
-          continue;
-        else
-          return false;
-      }
-    }
+  if (spice.scInputs.connected && FD_ISSET(spice.scInputs.socket, &readSet))
+  {
+    if (!spice_process_ack(&spice.scInputs))
+      return false;
 
-  return true;
+    if (!spice_on_inputs_channel_read())
+      return false;
+  }
+
+  if (spice.scMain.connected | spice.scInputs.connected)
+    return true;
+
+  /* shutdown */
+  spice.sessionID = 0;
+  if (spice.cbBuffer)
+    free(spice.cbBuffer);
+
+  spice.cbRemain = 0;
+  spice.cbSize   = 0;
+
+  spice.cbAgentGrabbed  = false;
+  spice.cbClientGrabbed = false;
+
+  return false;
 }
 
 // ============================================================================
@@ -319,6 +337,12 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
   *handled = false;
   if (!spice_read_nl(channel, header, sizeof(SpiceMiniDataHeader)))
     return false;
+
+  if (!channel->connected)
+  {
+    *handled = true;
+    return true;
+  }
 
   if (!channel->initDone)
     return true;
@@ -370,10 +394,16 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
     }
 
     case SPICE_MSG_WAIT_FOR_CHANNELS:
-    case SPICE_MSG_DISCONNECTING    :
     {
       *handled = true;
       return false;
+    }
+
+    case SPICE_MSG_DISCONNECTING:
+    {
+      *handled = true;
+      shutdown(channel->socket, SHUT_WR);
+      return true;
     }
 
     case SPICE_MSG_NOTIFY:
@@ -404,9 +434,7 @@ bool spice_on_main_channel_read()
   bool handled;
 
   if (!spice_on_common_read(channel, &header, &handled))
-  {
     return false;
-  }
 
   if (handled)
     return true;
@@ -802,19 +830,19 @@ bool spice_connect_channel(struct SpiceChannel * channel)
 
 void spice_disconnect_channel(struct SpiceChannel * channel)
 {
-  if (channel->connected)
+  if (!channel->connected)
+    return;
+
+  if (channel->ready)
   {
-    shutdown(channel->socket, SHUT_WR);
-
-    char buffer[1024];
-    ssize_t len = 0;
-    do
-      len = read(channel->socket, buffer, sizeof(buffer));
-    while(len > 0);
-
-    close(channel->socket);
+    SpiceMsgcDisconnecting * packet = SPICE_PACKET(SPICE_MSGC_DISCONNECTING,
+        SpiceMsgcDisconnecting, 0);
+    packet->time_stamp = get_timestamp();
+    packet->reason     = SPICE_LINK_ERR_OK;
+    SPICE_SEND_PACKET(channel, packet);
   }
-  channel->connected = false;
+
+  shutdown(channel->socket, SHUT_WR);
 }
 
 // ============================================================================
@@ -1106,7 +1134,7 @@ ssize_t spice_write_nl(const struct SpiceChannel * channel, const void * buffer,
 
 // ============================================================================
 
-bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssize_t size)
+bool spice_read_nl(struct SpiceChannel * channel, void * buffer, const ssize_t size)
 {
   if (!channel->connected)
     return false;
@@ -1120,7 +1148,11 @@ bool spice_read_nl(const struct SpiceChannel * channel, void * buffer, const ssi
   {
     ssize_t len = read(channel->socket, buf, left);
     if (len <= 0)
-      return false;
+    {
+      channel->connected = false;
+      close(channel->socket);
+      return true;
+    }
     left -= len;
     buf  += len;
   }

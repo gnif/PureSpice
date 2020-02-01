@@ -140,9 +140,13 @@ int main(int argc, char * argv[])
     }
   }
 
-  spice_disconnect();
 exit:
-  printf("shutdown\n");
+  printf("shutdown...");
+  fflush(stdout);
+  spice_disconnect();
+  while(spice_process(1)) {}
+  printf("done.\n");
+
 err_shutdown:
   adlShutdown();
 err_exit:
