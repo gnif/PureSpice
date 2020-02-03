@@ -113,8 +113,8 @@ struct SpiceMouse
 {
   uint32_t buttonState;
 
-  int                  sentCount;
-  int                  rpos, wpos;
+  atomic_int sentCount;
+  int rpos, wpos;
 };
 
 union SpiceAddr
@@ -271,33 +271,36 @@ bool spice_process(int timeout)
     inputsConnected = true;
     FD_SET(spice.scInputs.socket, &readSet);
     if (spice.scInputs.socket > fds)
-      fds = spice.scMain.socket;
+      fds = spice.scInputs.socket;
   }
 
   struct timeval tv;
   tv.tv_sec  = timeout / 1000;
   tv.tv_usec = (timeout % 1000) * 1000;
 
-  int rc = select(fds + 1, &readSet, NULL, NULL, &tv);
-  if (rc < 0)
-    return false;
-
-  if (spice.scMain.connected && FD_ISSET(spice.scMain.socket, &readSet))
+  int rc;
+  while((rc = select(fds + 1, &readSet, NULL, NULL, &tv)) != 0)
   {
-    if (!spice_on_main_channel_read())
+    if (rc < 0)
       return false;
 
-    if (spice.scMain.connected && !spice_process_ack(&spice.scMain))
-      return false;
-  }
+    if (spice.scMain.connected && FD_ISSET(spice.scMain.socket, &readSet))
+    {
+      if (!spice_on_main_channel_read())
+        return false;
 
-  if (spice.scInputs.connected && FD_ISSET(spice.scInputs.socket, &readSet))
-  {
-    if (!spice_process_ack(&spice.scInputs))
-      return false;
+      if (spice.scMain.connected && !spice_process_ack(&spice.scMain))
+        return false;
+    }
 
-    if (!spice_on_inputs_channel_read())
-      return false;
+    if (spice.scInputs.connected && FD_ISSET(spice.scInputs.socket, &readSet))
+    {
+      if (!spice_process_ack(&spice.scInputs))
+        return false;
+
+      if (!spice_on_inputs_channel_read())
+        return false;
+    }
   }
 
   if (spice.scMain.connected | spice.scInputs.connected)
@@ -654,10 +657,9 @@ bool spice_on_inputs_channel_read()
 
     case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
     {
-      const int count = __sync_add_and_fetch(&spice.mouse.sentCount, SPICE_INPUT_MOTION_ACK_BUNCH);
-      if (count < 0)
-        return false;
-      return true;
+      const int count = atomic_fetch_sub(&spice.mouse.sentCount,
+          SPICE_INPUT_MOTION_ACK_BUNCH);
+      return (count >= SPICE_INPUT_MOTION_ACK_BUNCH);
     }
   }
 
@@ -1254,7 +1256,7 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
   msg->button_state = spice.mouse.buttonState;
   msg->display_id   = 0;
 
-  __sync_fetch_and_add(&spice.mouse.sentCount, 1);
+  atomic_fetch_add(&spice.mouse.sentCount, 1);
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
@@ -1272,7 +1274,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   msg->y            = y;
   msg->button_state = spice.mouse.buttonState;
 
-  __sync_fetch_and_add(&spice.mouse.sentCount, 1);
+  atomic_fetch_add(&spice.mouse.sentCount, 1);
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
