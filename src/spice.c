@@ -60,25 +60,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #define SPICE_PACKET(htype, payloadType, extraData) \
 ({ \
   uint8_t packet[sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + sizeof(payloadType)]; \
-  ssize_t             * sz     = (ssize_t*)packet; \
-  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(packet + sizeof(ssize_t)); \
+  ssize_t * sz                 = (ssize_t*)packet; \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(sz + 1); \
   *sz          = sizeof(SpiceMiniDataHeader) + sizeof(payloadType); \
   header->type = (htype); \
   header->size = sizeof(payloadType) + extraData; \
   (payloadType *)(header + 1); \
-})
-
-/* only the main channel requires locking due to the agent needing to send
- * multiple packets, all other channels are atomic */
-#define SPICE_SEND_PACKET_LOCKED(channel, packet) \
-({ \
-  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
-      sizeof(SpiceMiniDataHeader)); \
-  ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
-  SPICE_LOCK((channel)->lock); \
-  const ssize_t wrote = spice_write_nl((channel), header, *sz); \
-  SPICE_UNLOCK((channel)->lock); \
-  wrote == *sz; \
 })
 
 #define SPICE_SEND_PACKET(channel, packet) \
@@ -86,9 +73,21 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
       sizeof(SpiceMiniDataHeader)); \
   ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
-  const ssize_t wrote = spice_write_nl((channel), header, *sz); \
+  SPICE_LOCK((channel)->lock); \
+  const ssize_t wrote = send((channel)->socket, header, *sz, 0); \
+  SPICE_UNLOCK((channel)->lock); \
   wrote == *sz; \
 })
+
+#define SPICE_SEND_PACKET_NL(channel, packet) \
+({ \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
+      sizeof(SpiceMiniDataHeader)); \
+  ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
+  const ssize_t wrote = send((channel)->socket, header, *sz, 0); \
+  wrote == *sz; \
+})
+
 
 // ============================================================================
 
@@ -381,7 +380,7 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
         SPICE_PACKET(SPICE_MSGC_ACK_SYNC, SpiceMsgcAckSync, 0);
 
       out->generation = in.generation;
-      return SPICE_SEND_PACKET_LOCKED(channel, out);
+      return SPICE_SEND_PACKET(channel, out);
     }
 
     case SPICE_MSG_PING:
@@ -401,7 +400,7 @@ bool spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * h
 
       out->id        = in.id;
       out->timestamp = in.timestamp;
-      return SPICE_SEND_PACKET_LOCKED(channel, out);
+      return SPICE_SEND_PACKET(channel, out);
     }
 
     case SPICE_MSG_WAIT_FOR_CHANNELS:
@@ -480,7 +479,7 @@ bool spice_on_main_channel_read()
       return false;
 
     void * packet = SPICE_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, void, 0);
-    if (!SPICE_SEND_PACKET_LOCKED(channel, packet))
+    if (!SPICE_SEND_PACKET(channel, packet))
     {
       spice_disconnect();
       return false;
@@ -862,7 +861,7 @@ bool spice_agent_connect()
 {
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   *packet = SPICE_AGENT_TOKENS_MAX;
-  if (!SPICE_SEND_PACKET_LOCKED(&spice.scMain, packet))
+  if (!SPICE_SEND_PACKET(&spice.scMain, packet))
     return false;
 
   if (!spice_agent_send_caps(true))
@@ -1094,7 +1093,7 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 
   SPICE_LOCK(spice.scMain.lock);
 
-  if (!SPICE_SEND_PACKET(&spice.scMain, msg))
+  if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
   {
     SPICE_UNLOCK(spice.scMain.lock);
     return false;
@@ -1112,7 +1111,7 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
     else
     {
       void * cont = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, void, toWrite);
-      ok = SPICE_SEND_PACKET(&spice.scMain, cont);
+      ok = SPICE_SEND_PACKET_NL(&spice.scMain, cont);
     }
 
     if (!ok)
@@ -1237,7 +1236,7 @@ bool spice_mouse_mode(bool server)
     SpiceMsgcMainMouseModeRequest, 0);
 
   msg->mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
-  return SPICE_SEND_PACKET_LOCKED(&spice.scMain, msg);
+  return SPICE_SEND_PACKET(&spice.scMain, msg);
 }
 
 // ============================================================================
