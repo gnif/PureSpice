@@ -284,7 +284,7 @@ bool spice_process(int timeout)
     if (rc < 0)
       return false;
 
-    if (spice.scMain.connected && FD_ISSET(spice.scMain.socket, &readSet))
+    if (FD_ISSET(spice.scMain.socket, &readSet))
     {
       if (!spice_on_main_channel_read())
         return false;
@@ -293,7 +293,7 @@ bool spice_process(int timeout)
         return false;
     }
 
-    if (spice.scInputs.connected && FD_ISSET(spice.scInputs.socket, &readSet))
+    if (FD_ISSET(spice.scInputs.socket, &readSet))
     {
       if (!spice_process_ack(&spice.scInputs))
         return false;
