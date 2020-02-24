@@ -135,6 +135,7 @@ struct Spice
   uint32_t serverTokens;
   uint32_t sessionID;
   uint32_t channelID;
+
   struct   SpiceChannel scMain;
   struct   SpiceChannel scInputs;
 
@@ -309,7 +310,10 @@ bool spice_process(int timeout)
   /* shutdown */
   spice.sessionID = 0;
   if (spice.cbBuffer)
+  {
     free(spice.cbBuffer);
+    spice.cbBuffer = NULL;
+  }
 
   spice.cbRemain = 0;
   spice.cbSize   = 0;
@@ -1251,13 +1255,16 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
   SpiceMsgcMousePosition * msg =
     SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_POSITION, SpiceMsgcMousePosition, 0);
 
+  msg->display_id   = 0;
+  msg->button_state = spice.mouse.buttonState;
   msg->x            = x;
   msg->y            = y;
-  msg->button_state = spice.mouse.buttonState;
-  msg->display_id   = 0;
 
   atomic_fetch_add(&spice.mouse.sentCount, 1);
-  return SPICE_SEND_PACKET(&spice.scInputs, msg);
+  if (!SPICE_SEND_PACKET(&spice.scInputs, msg))
+    return false;
+
+  return true;
 }
 
 // ============================================================================
@@ -1270,12 +1277,25 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   SpiceMsgcMouseMotion * msg =
     SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion, 0);
 
-  msg->x            = x;
-  msg->y            = y;
   msg->button_state = spice.mouse.buttonState;
 
-  atomic_fetch_add(&spice.mouse.sentCount, 1);
-  return SPICE_SEND_PACKET(&spice.scInputs, msg);
+  /* while the protocol supports movements greater then +-127 the QEMU
+   * virtio-mouse device does not, so we need to split this up into seperate
+   * messages */
+  while(x != 0 || y != 0)
+  {
+    msg->x = x > 127 ? 127 : (x < -127 ? -127 : x);
+    msg->y = y > 127 ? 127 : (y < -127 ? -127 : y);
+
+    atomic_fetch_add(&spice.mouse.sentCount, 1);
+    if (!SPICE_SEND_PACKET(&spice.scInputs, msg))
+      return false;
+
+    x -= msg->x;
+    y -= msg->y;
+  }
+
+  return true;
 }
 
 // ============================================================================
