@@ -200,7 +200,9 @@ bool    spice_discard_nl(const struct SpiceChannel * channel, ssize_t size);
 static uint64_t get_timestamp()
 {
   struct timespec time;
-  assert(clock_gettime(CLOCK_MONOTONIC, &time) == 0);
+  const int result = clock_gettime(CLOCK_MONOTONIC, &time);
+  if (result != 0)
+    perror("clock_gettime failed! this should never happen!\n");
   return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
 }
 
