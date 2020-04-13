@@ -59,8 +59,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define SPICE_PACKET(htype, payloadType, extraData) \
 ({ \
-  uint8_t packet[sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + sizeof(payloadType)]; \
-  ssize_t * sz                 = (ssize_t*)packet; \
+  uint8_t * packet = alloca(sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + \
+      sizeof(payloadType)); \
+  ssize_t * sz = (ssize_t*)packet; \
   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(sz + 1); \
   *sz          = sizeof(SpiceMiniDataHeader) + sizeof(payloadType); \
   header->type = (htype); \
