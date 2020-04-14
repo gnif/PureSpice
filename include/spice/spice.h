@@ -16,6 +16,8 @@ You should have received a copy of the GNU General Public License along with
 this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
+#ifndef PURE_SPICE_H__
+#define PURE_SPICE_H__
 
 #include <sys/types.h>
 #include <stdbool.h>
@@ -37,6 +39,11 @@ typedef void (*SpiceClipboardNotice )(const SpiceDataType type);
 typedef void (*SpiceClipboardData   )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
 typedef void (*SpiceClipboardRelease)();
 typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 bool spice_connect(const char * host, const unsigned short port, const char * password);
 void spice_disconnect();
@@ -62,3 +69,9 @@ bool spice_set_clipboard_cb(
     SpiceClipboardData    cbDataFn,
     SpiceClipboardRelease cbReleaseFn,
     SpiceClipboardRequest cbRequestFn);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* PURE_SPICE_H__ */
