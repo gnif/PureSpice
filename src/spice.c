@@ -307,7 +307,7 @@ bool spice_process(int timeout)
     }
   }
 
-  if (spice.scMain.connected | spice.scInputs.connected)
+  if (spice.scMain.connected || spice.scInputs.connected)
     return true;
 
   /* shutdown */
