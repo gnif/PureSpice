@@ -1287,28 +1287,45 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   if (!spice.scInputs.connected)
     return false;
 
-  SpiceMsgcMouseMotion * msg =
-    SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion, 0);
-
-  msg->button_state = spice.mouse.buttonState;
-
   /* while the protocol supports movements greater then +-127 the QEMU
    * virtio-mouse device does not, so we need to split this up into seperate
-   * messages */
+   * messages. For performance we build this as a single buffer otherwise this
+   * will be split into multiple packets */
+
+  const unsigned delta = abs(x) > abs(y) ? abs(x) : abs(y);
+  const unsigned msgs  = (delta + 126) / 127;
+  const ssize_t bufferSize = (
+    sizeof(SpiceMiniDataHeader ) +
+    sizeof(SpiceMsgcMouseMotion)
+  ) * msgs;
+
+  uint8_t buffer[bufferSize];
+  uint8_t * msg = buffer;
+
   while(x != 0 || y != 0)
   {
-    msg->x = x > 127 ? 127 : (x < -127 ? -127 : x);
-    msg->y = y > 127 ? 127 : (y < -127 ? -127 : y);
+    SpiceMiniDataHeader  *h = (SpiceMiniDataHeader  *)msg;
+    SpiceMsgcMouseMotion *m = (SpiceMsgcMouseMotion *)(h + 1);
+    msg = (uint8_t*)(m + 1);
 
-    atomic_fetch_add(&spice.mouse.sentCount, 1);
-    if (!SPICE_SEND_PACKET(&spice.scInputs, msg))
-      return false;
+    h->size = sizeof(SpiceMsgcMouseMotion);
+    h->type = SPICE_MSGC_INPUTS_MOUSE_MOTION;
 
-    x -= msg->x;
-    y -= msg->y;
+    m->x = x > 127 ? 127 : (x < -127 ? -127 : x);
+    m->y = y > 127 ? 127 : (y < -127 ? -127 : y);
+    m->button_state = spice.mouse.buttonState;
+
+    x -= m->x;
+    y -= m->y;
   }
 
-  return true;
+  atomic_fetch_add(&spice.mouse.sentCount, msgs);
+
+  SPICE_LOCK(spice.scInputs.lock);
+  const ssize_t wrote = send(spice.scInputs.socket, buffer, bufferSize, 0);
+  SPICE_UNLOCK(spice.scInputs.lock);
+
+  return wrote == bufferSize;
 }
 
 // ============================================================================
