@@ -854,11 +854,21 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
 
   if (channel->ready)
   {
+    /* enable nodelay so we can trigger a flush after this message */
+    int flag = 0;
+    if (spice.family != AF_UNIX)
+      setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int));
+
     SpiceMsgcDisconnecting * packet = SPICE_PACKET(SPICE_MSGC_DISCONNECTING,
         SpiceMsgcDisconnecting, 0);
     packet->time_stamp = get_timestamp();
     packet->reason     = SPICE_LINK_ERR_OK;
     SPICE_SEND_PACKET(channel, packet);
+
+    /* re-enable nodelay as this triggers a flush according to the man page */
+    flag = 1;
+    if (spice.family != AF_UNIX)
+      setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(int));
   }
 
   shutdown(channel->socket, SHUT_WR);
