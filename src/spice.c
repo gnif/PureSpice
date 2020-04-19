@@ -1031,7 +1031,10 @@ bool spice_agent_process(uint32_t dataSize)
 
         uint32_t *types = malloc(remaining);
         if (!spice_read_nl(&spice.scMain, types, remaining))
+        {
+          free(types);
           return false;
+        }
 
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
@@ -1042,7 +1045,8 @@ bool spice_agent_process(uint32_t dataSize)
         if (spice.cbSelection)
         {
           // Windows doesnt support this, so until it's needed there is no point messing with it
-          return false;
+          free(types);
+          return true;
         }
 
         if (spice.cbNoticeFn)
