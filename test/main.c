@@ -117,6 +117,7 @@ int main(int argc, char * argv[])
         continue;
 
       case ADL_EVENT_CLOSE:
+      case ADL_EVENT_QUIT:
         goto exit;
 
       case ADL_EVENT_KEY_DOWN:
