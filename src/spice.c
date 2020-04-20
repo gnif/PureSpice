@@ -1190,20 +1190,16 @@ SPICE_STATUS spice_read_nl(struct SpiceChannel * channel, void * buffer, const s
 
 SPICE_STATUS spice_discard_nl(const struct SpiceChannel * channel, ssize_t size)
 {
-  void *c = malloc(8192);
+  uint8_t c[1024];
   ssize_t left = size;
   while(left)
   {
-    size_t len = read(channel->socket, c, left > 8192 ? 8192 : left);
+    size_t len = read(channel->socket, c, left > sizeof(c) ? sizeof(c) : left);
     if (len <= 0)
-    {
-      free(c);
       return SPICE_STATUS_ERROR;
-    }
     left -= len;
   }
 
-  free(c);
   return SPICE_STATUS_OK;
 }
 
