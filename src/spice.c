@@ -982,14 +982,15 @@ SPICE_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
   {
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
     {
-      VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)malloc(msg.size);
-      memset(caps, 0, msg.size);
+      // make sure the message size is not insane to avoid a stack overflow
+      // since we are using alloca for performance
+      if (msg.size > 1024)
+        return SPICE_STATUS_ERROR;
+
+      VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)alloca(msg.size);
 
       if ((status = spice_read_nl(&spice.scMain, caps, msg.size, dataAvailable)) != SPICE_STATUS_OK)
-      {
-        free(caps);
         return status;
-      }
 
       const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg.size);
       spice.cbSupported  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) ||
@@ -997,12 +998,9 @@ SPICE_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
       spice.cbSelection  = VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize, VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
       if (caps->request)
-        status = spice_agent_send_caps(false);
-      else
-        status = SPICE_STATUS_OK;
+        return spice_agent_send_caps(false);
 
-      free(caps);
-      return status;
+      return SPICE_STATUS_OK;
     }
 
     case VD_AGENT_CLIPBOARD:
@@ -1075,12 +1073,14 @@ SPICE_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
         if (remaining == 0)
           return SPICE_STATUS_OK;
 
-        uint32_t *types = malloc(remaining);
+        // ensure the size is sane to avoid a stack overflow since we use alloca
+        // for performance
+        if (remaining > 1024)
+          return SPICE_STATUS_ERROR;
+
+        uint32_t *types = alloca(remaining);
         if ((status = spice_read_nl(&spice.scMain, types, remaining, dataAvailable)) != SPICE_STATUS_OK)
-        {
-          free(types);
           return status;
-        }
 
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
@@ -1091,14 +1091,12 @@ SPICE_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
         if (spice.cbSelection)
         {
           // Windows doesnt support this, so until it's needed there is no point messing with it
-          free(types);
           return SPICE_STATUS_OK;
         }
 
         if (spice.cbNoticeFn)
             spice.cbNoticeFn(spice.cbType);
 
-        free(types);
         return SPICE_STATUS_OK;
       }
     }
@@ -1126,7 +1124,7 @@ void spice_agent_on_clipboard()
 SPICE_STATUS spice_agent_send_caps(bool request)
 {
   const ssize_t capsSize = sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES;
-  VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)malloc(capsSize);
+  VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)alloca(capsSize);
   memset(caps, 0, capsSize);
 
   caps->request = request ? 1 : 0;
@@ -1134,11 +1132,7 @@ SPICE_STATUS spice_agent_send_caps(bool request)
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
   if (!spice_agent_write_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, caps, capsSize))
-  {
-    free(caps);
     return SPICE_STATUS_ERROR;
-  }
-  free(caps);
 
   return SPICE_STATUS_OK;
 }
