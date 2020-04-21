@@ -1023,7 +1023,7 @@ SPICE_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
         spice.cbAgentGrabbed = false;
         if (spice.cbReleaseFn)
           spice.cbReleaseFn();
-        return true;
+        return SPICE_STATUS_OK;
       }
 
       if (msg.type == VD_AGENT_CLIPBOARD || msg.type == VD_AGENT_CLIPBOARD_REQUEST)
