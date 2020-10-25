@@ -76,7 +76,7 @@ static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, siz
     (seed+mask_len)[2] = n >> 8;
     (seed+mask_len)[3] = n >> 0;
 
-    sha1(hash, seed, sizeof(seed));
+    sha1(hash, seed, mask_len + 4);
     if (dest_len <= SHA1_HASH_LEN)
     {
       memxor(dest, hash, dest_len);
@@ -104,7 +104,8 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
 
   const int emSize = sizeof(*em) + key_size - SHA1_HASH_LEN - 1;
   em = alloca(emSize);
-  memset(&em, 0, emSize);
+  memset(em, 0, emSize);
+
   sha1(em->db, (uint8_t *)"", 0);
   em->all[key_size - len - 1] = 0x1;
   memcpy(em->all + (key_size - len), message, len);
