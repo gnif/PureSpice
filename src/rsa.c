@@ -65,8 +65,8 @@ static void sha1(uint8_t * hash, const uint8_t *data, unsigned int len)
 
 static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, size_t mask_len)
 {
-  uint8_t hash[SHA1_HASH_LEN];
-  uint8_t seed[mask_len + 4 ];
+  uint8_t   hash[SHA1_HASH_LEN];
+  uint8_t * seed = alloca(mask_len + 4);
   memcpy(seed, mask, mask_len);
 
   for(unsigned int n = 0;; ++n)
@@ -98,25 +98,28 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
   {
     uint8_t all[1];
     uint8_t ros[SHA1_HASH_LEN];
-    uint8_t db [key_size - SHA1_HASH_LEN - 1];
-  } em;
+    uint8_t db [];
+  }
+  * em;
 
-  memset(&em, 0, sizeof(em));
-  sha1(em.db, (uint8_t *)"", 0);
-  em.all[key_size - len - 1] = 0x1;
-  memcpy(em.all + (key_size - len), message, len);
+  const int emSize = sizeof(*em) + key_size - SHA1_HASH_LEN - 1;
+  em = alloca(emSize);
+  memset(&em, 0, emSize);
+  sha1(em->db, (uint8_t *)"", 0);
+  em->all[key_size - len - 1] = 0x1;
+  memcpy(em->all + (key_size - len), message, len);
 
   /* we are not too worried about randomness since we are just making a local
    * connection, should anyone use this code outside of LookingGlass please be
    * sure to use something better such as `gnutls_rnd` */
   for(int i = 0; i < SHA1_HASH_LEN; ++i)
-    em.ros[i] = rand() % 255;
+    em->ros[i] = rand() % 255;
 
   const int db_len = key_size - SHA1_HASH_LEN - 1;
-  oaep_mask(em.db , db_len       , em.ros, SHA1_HASH_LEN);
-  oaep_mask(em.ros, SHA1_HASH_LEN, em.db , db_len       );
+  oaep_mask(em->db , db_len       , em->ros, SHA1_HASH_LEN);
+  oaep_mask(em->ros, SHA1_HASH_LEN, em->db , db_len       );
 
-  nettle_mpz_set_str_256_u(m, key_size, em.all);
+  nettle_mpz_set_str_256_u(m, key_size, em->all);
   return true;
 }
 #endif
