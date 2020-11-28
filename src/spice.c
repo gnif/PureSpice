@@ -92,6 +92,12 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   wrote == *sz; \
 })
 
+// currently (2020) these defines are not yet availble for most distros, so we
+// just define them ourselfs for now
+#define _SPICE_MOUSE_BUTTON_SIDE        6
+#define _SPICE_MOUSE_BUTTON_EXTRA       7
+#define _SPICE_MOUSE_BUTTON_MASK_SIDE  (1 << 5)
+#define _SPICE_MOUSE_BUTTON_MASK_EXTRA (1 << 6)
 
 // ============================================================================
 
@@ -1392,9 +1398,11 @@ bool spice_mouse_press(uint32_t button)
 
   switch(button)
   {
-    case SPICE_MOUSE_BUTTON_LEFT  : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_LEFT  ; break;
-    case SPICE_MOUSE_BUTTON_MIDDLE: spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_MIDDLE; break;
-    case SPICE_MOUSE_BUTTON_RIGHT : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_RIGHT ; break;
+    case SPICE_MOUSE_BUTTON_LEFT   : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_LEFT   ; break;
+    case SPICE_MOUSE_BUTTON_MIDDLE : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_MIDDLE ; break;
+    case SPICE_MOUSE_BUTTON_RIGHT  : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_RIGHT  ; break;
+    case _SPICE_MOUSE_BUTTON_SIDE  : spice.mouse.buttonState |= _SPICE_MOUSE_BUTTON_MASK_SIDE  ; break;
+    case _SPICE_MOUSE_BUTTON_EXTRA : spice.mouse.buttonState |= _SPICE_MOUSE_BUTTON_MASK_EXTRA ; break;
   }
 
   SpiceMsgcMousePress * msg =
@@ -1415,9 +1423,11 @@ bool spice_mouse_release(uint32_t button)
 
   switch(button)
   {
-    case SPICE_MOUSE_BUTTON_LEFT  : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_LEFT  ; break;
-    case SPICE_MOUSE_BUTTON_MIDDLE: spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_MIDDLE; break;
-    case SPICE_MOUSE_BUTTON_RIGHT : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_RIGHT ; break;
+    case SPICE_MOUSE_BUTTON_LEFT   : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_LEFT   ; break;
+    case SPICE_MOUSE_BUTTON_MIDDLE : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_MIDDLE ; break;
+    case SPICE_MOUSE_BUTTON_RIGHT  : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_RIGHT  ; break;
+    case _SPICE_MOUSE_BUTTON_SIDE  : spice.mouse.buttonState &= ~_SPICE_MOUSE_BUTTON_MASK_SIDE  ; break;
+    case _SPICE_MOUSE_BUTTON_EXTRA : spice.mouse.buttonState &= ~_SPICE_MOUSE_BUTTON_MASK_EXTRA ; break;
   }
 
   SpiceMsgcMouseRelease * msg =
