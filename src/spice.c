@@ -1147,9 +1147,10 @@ SPICE_STATUS spice_agent_send_caps(bool request)
 
 bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
 {
+  const int maxSize = VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage);
+
   uint8_t * buf   = (uint8_t *)buffer;
-  ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage) ?
-    VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage) : size;
+  ssize_t toWrite = size > maxSize ? maxSize : size;
 
   VDAgentMessage * msg =
     SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, toWrite);
@@ -1167,34 +1168,31 @@ bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
     return false;
   }
 
-  bool first = true;
-  while(toWrite)
+  bool cont = false;
+  while(size)
   {
-    bool ok = false;
-    if (first)
+    if (cont)
     {
-      ok    = spice_write_nl(&spice.scMain, buf, toWrite) == toWrite;
-      first = false;
-    }
-    else
-    {
-      void * cont = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, toWrite);
-      ok = SPICE_SEND_PACKET_NL(&spice.scMain, cont);
+      void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, toWrite);
+      if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
+        goto err;
     }
 
-    if (!ok)
-    {
-      SPICE_UNLOCK(spice.scMain.lock);
-      return false;
-    }
+    if (spice_write_nl(&spice.scMain, buf, toWrite) != toWrite)
+      goto err;
 
     size   -= toWrite;
     buf    += toWrite;
     toWrite = size > VD_AGENT_MAX_DATA_SIZE ? VD_AGENT_MAX_DATA_SIZE : size;
+    cont    = true;
   }
 
   SPICE_UNLOCK(spice.scMain.lock);
   return true;
+
+err:
+  SPICE_UNLOCK(spice.scMain.lock);
+  return false;
 }
 
 // ============================================================================
