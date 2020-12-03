@@ -154,6 +154,7 @@ struct Spice
   uint32_t serverTokens;
   uint32_t sessionID;
   uint32_t channelID;
+  ssize_t  agentMsg;
 
   struct   SpiceChannel scMain;
   struct   SpiceChannel scInputs;
@@ -207,7 +208,8 @@ static uint32_t spice_type_to_agent_type(SpiceDataType type);
 static SpiceDataType agent_type_to_spice_type(uint32_t type);
 
 // thread safe read/write methods
-bool spice_agent_write_msg (uint32_t type, const void * buffer, ssize_t size);
+bool spice_agent_start_msg(uint32_t type, ssize_t size);
+bool spice_agent_write_msg(const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
 SPICE_STATUS spice_read_nl   (      struct SpiceChannel * channel, void * buffer, const ssize_t size, int * dataAvailable);
@@ -1137,7 +1139,8 @@ SPICE_STATUS spice_agent_send_caps(bool request)
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
-  if (!spice_agent_write_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, caps, capsSize))
+  if (!spice_agent_start_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, capsSize) ||
+      !spice_agent_write_msg(caps, capsSize))
     return SPICE_STATUS_ERROR;
 
   return SPICE_STATUS_OK;
@@ -1145,49 +1148,56 @@ SPICE_STATUS spice_agent_send_caps(bool request)
 
 // ============================================================================
 
-bool spice_agent_write_msg(uint32_t type, const void * buffer, ssize_t size)
+bool spice_agent_start_msg(uint32_t type, ssize_t size)
 {
-  const int maxSize = VD_AGENT_MAX_DATA_SIZE - sizeof(VDAgentMessage);
-
-  uint8_t * buf   = (uint8_t *)buffer;
-  ssize_t toWrite = size > maxSize ? maxSize : size;
-
   VDAgentMessage * msg =
-    SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, toWrite);
+    SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
 
-  msg->protocol = VD_AGENT_PROTOCOL;
-  msg->type     = type;
-  msg->opaque   = 0;
-  msg->size     = size;
+  msg->protocol  = VD_AGENT_PROTOCOL;
+  msg->type      = type;
+  msg->opaque    = 0;
+  msg->size      = size;
+  spice.agentMsg = size;
 
   SPICE_LOCK(spice.scMain.lock);
-
   if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
   {
     SPICE_UNLOCK(spice.scMain.lock);
     return false;
   }
 
-  bool cont = false;
+  if (size == 0)
+    SPICE_UNLOCK(spice.scMain.lock);
+
+  return true;
+}
+
+// ============================================================================
+
+bool spice_agent_write_msg(const void * buffer, ssize_t size)
+{
+  assert(size <= spice.agentMsg);
+
   while(size)
   {
-    if (cont)
-    {
-      void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, toWrite);
-      if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
-        goto err;
-    }
+    const ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE ?
+      VD_AGENT_MAX_DATA_SIZE : size;
 
-    if (spice_write_nl(&spice.scMain, buf, toWrite) != toWrite)
+    void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, toWrite);
+    if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
       goto err;
 
-    size   -= toWrite;
-    buf    += toWrite;
-    toWrite = size > VD_AGENT_MAX_DATA_SIZE ? VD_AGENT_MAX_DATA_SIZE : size;
-    cont    = true;
+    if (spice_write_nl(&spice.scMain, buffer, toWrite) != toWrite)
+      goto err;
+
+    size           -= toWrite;
+    buffer         += toWrite;
+    spice.agentMsg -= toWrite;
   }
 
-  SPICE_UNLOCK(spice.scMain.lock);
+  if (!spice.agentMsg)
+    SPICE_UNLOCK(spice.scMain.lock);
+
   return true;
 
 err:
@@ -1480,7 +1490,8 @@ bool spice_clipboard_request(SpiceDataType type)
     return false;
 
   req.type = spice_type_to_agent_type(type);
-  if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
+  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_REQUEST, sizeof(req)) ||
+      !spice_agent_write_msg(&req, sizeof(req)))
     return false;
 
   return true;
@@ -1513,7 +1524,8 @@ bool spice_clipboard_grab(SpiceDataType type)
     uint8_t req[8] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
     ((uint32_t*)req)[1] = spice_type_to_agent_type(type);
 
-    if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_GRAB, req, sizeof(req)))
+    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(req)) ||
+        !spice_agent_write_msg(req, sizeof(req)))
       return false;
 
     spice.cbClientGrabbed = true;
@@ -1521,7 +1533,8 @@ bool spice_clipboard_grab(SpiceDataType type)
   }
 
   uint32_t req = spice_type_to_agent_type(type);
-  if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_GRAB, &req, sizeof(req)))
+  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(req)) ||
+      !spice_agent_write_msg(&req, sizeof(req)))
     return false;
 
   spice.cbClientGrabbed = true;
@@ -1539,14 +1552,15 @@ bool spice_clipboard_release()
   if (spice.cbSelection)
   {
     uint8_t req[4] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
-    if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_RELEASE, req, sizeof(req)))
+    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, sizeof(req)) ||
+        !spice_agent_write_msg(req, sizeof(req)))
       return false;
 
     spice.cbClientGrabbed = false;
     return true;
   }
 
-   if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD_RELEASE, NULL, 0))
+   if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, 0))
      return false;
 
    spice.cbClientGrabbed = false;
@@ -1555,34 +1569,31 @@ bool spice_clipboard_release()
 
 // ============================================================================
 
-bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
+bool spice_clipboard_data_start(SpiceDataType type, size_t size)
 {
-  uint8_t * buffer;
-  size_t    bufSize;
+  uint8_t buffer[8];
+  size_t  bufSize;
 
   if (spice.cbSelection)
   {
-    bufSize                = 8 + size;
-    buffer                 = (uint8_t *)malloc(bufSize);
+    bufSize                = 8;
     buffer[0]              = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
     buffer[1]              = buffer[2] = buffer[3] = 0;
     ((uint32_t*)buffer)[1] = spice_type_to_agent_type(type);
-    memcpy(buffer + 8, data, size);
   }
   else
   {
-    bufSize                = 4 + size;
-    buffer                 = (uint8_t *)malloc(bufSize);
+    bufSize                = 4;
     ((uint32_t*)buffer)[0] = spice_type_to_agent_type(type);
-    memcpy(buffer + 4, data, size);
   }
 
-  if (!spice_agent_write_msg(VD_AGENT_CLIPBOARD, buffer, bufSize))
-  {
-    free(buffer);
-    return false;
-  }
+  return spice_agent_start_msg(VD_AGENT_CLIPBOARD, bufSize + size) &&
+    spice_agent_write_msg(buffer, bufSize);
+}
 
-  free(buffer);
-  return true;
+// ============================================================================
+
+bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
+{
+  return spice_agent_write_msg(data, size);
 }
