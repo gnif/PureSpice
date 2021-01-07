@@ -176,6 +176,9 @@ struct Spice
   SpiceClipboardData    cbDataFn;
   SpiceClipboardRelease cbReleaseFn;
   SpiceClipboardRequest cbRequestFn;
+
+  uint8_t * motionBuffer;
+  size_t    motionBufferSize;
 };
 
 // globals
@@ -261,6 +264,12 @@ void spice_disconnect()
 {
   spice_disconnect_channel(&spice.scInputs);
   spice_disconnect_channel(&spice.scMain  );
+
+  if (spice.motionBuffer)
+  {
+    free(spice.motionBuffer);
+    spice.motionBuffer = NULL;
+  }
 }
 
 // ============================================================================
@@ -1368,8 +1377,16 @@ bool spice_mouse_motion(int32_t x, int32_t y)
     sizeof(SpiceMsgcMouseMotion)
   ) * msgs;
 
-  uint8_t buffer[bufferSize];
-  uint8_t * msg = buffer;
+  if (bufferSize > spice.motionBufferSize)
+  {
+    if (spice.motionBuffer)
+      free(spice.motionBuffer);
+    spice.motionBuffer     = malloc(bufferSize);
+    spice.motionBufferSize = bufferSize;
+  }
+
+  uint8_t * buffer = spice.motionBuffer;
+  uint8_t * msg    = buffer;
 
   while(x != 0 || y != 0)
   {
