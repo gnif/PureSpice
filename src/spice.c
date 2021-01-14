@@ -944,7 +944,7 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
 SPICE_STATUS spice_agent_connect()
 {
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
-  *packet = SPICE_AGENT_TOKENS_MAX;
+  memcpy(packet, &(uint32_t){SPICE_AGENT_TOKENS_MAX}, sizeof(uint32_t));
   if (!SPICE_SEND_PACKET(&spice.scMain, packet))
     return SPICE_STATUS_ERROR;
 
