@@ -1268,7 +1268,7 @@ SPICE_STATUS spice_discard_nl(struct SpiceChannel * channel, ssize_t size, int *
   ssize_t left = size;
   while(left)
   {
-    size_t len = read(channel->socket, c, left > sizeof(c) ? sizeof(c) : left);
+    ssize_t len = read(channel->socket, c, left > sizeof(c) ? sizeof(c) : left);
     if (len == 0)
       return SPICE_STATUS_NODATA;
 
