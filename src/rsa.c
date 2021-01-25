@@ -96,7 +96,7 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
 
   struct
   {
-    uint8_t all[1];
+    uint8_t zero;
     uint8_t ros[SHA1_HASH_LEN];
     uint8_t db [];
   }
@@ -107,8 +107,8 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
   memset(em, 0, emSize);
 
   sha1(em->db, (uint8_t *)"", 0);
-  em->all[key_size - len - 1] = 0x1;
-  memcpy(em->all + (key_size - len), message, len);
+  ((uint8_t *)em)[key_size - len - 1] = 0x1;
+  memcpy((uint8_t *)em + (key_size - len), message, len);
 
   /* we are not too worried about randomness since we are just making a local
    * connection, should anyone use this code outside of LookingGlass please be
@@ -120,7 +120,7 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
   oaep_mask(em->db , db_len       , em->ros, SHA1_HASH_LEN);
   oaep_mask(em->ros, SHA1_HASH_LEN, em->db , db_len       );
 
-  nettle_mpz_set_str_256_u(m, key_size, em->all);
+  nettle_mpz_set_str_256_u(m, key_size, (uint8_t*)em);
   return true;
 }
 #endif
