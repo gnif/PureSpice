@@ -130,6 +130,7 @@ struct SpiceKeyboard
 
 struct SpiceMouse
 {
+  atomic_flag lock;
   uint32_t buttonState;
 
   atomic_int sentCount;
@@ -743,6 +744,9 @@ SPICE_STATUS spice_connect_channel(struct SpiceChannel * channel)
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
 
+  if (channel == &spice.scInputs)
+    SPICE_LOCK_INIT(spice.mouse.lock);
+
   SPICE_LOCK_INIT(channel->lock);
 
   size_t addrSize;
@@ -1346,10 +1350,12 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
   SpiceMsgcMousePosition * msg =
     SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_POSITION, SpiceMsgcMousePosition, 0);
 
+  SPICE_LOCK(spice.mouse.lock);
   msg->display_id   = 0;
   msg->button_state = spice.mouse.buttonState;
   msg->x            = x;
   msg->y            = y;
+  SPICE_UNLOCK(spice.mouse.lock);
 
   atomic_fetch_add(&spice.mouse.sentCount, 1);
   if (!SPICE_SEND_PACKET(&spice.scInputs, msg))
@@ -1388,6 +1394,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   uint8_t * buffer = spice.motionBuffer;
   uint8_t * msg    = buffer;
 
+  SPICE_LOCK(spice.mouse.lock);
   while(x != 0 || y != 0)
   {
     SpiceMiniDataHeader  *h = (SpiceMiniDataHeader  *)msg;
@@ -1404,6 +1411,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
     x -= m->x;
     y -= m->y;
   }
+  SPICE_UNLOCK(spice.mouse.lock);
 
   atomic_fetch_add(&spice.mouse.sentCount, msgs);
 
@@ -1421,6 +1429,7 @@ bool spice_mouse_press(uint32_t button)
   if (!spice.scInputs.connected)
     return false;
 
+  SPICE_LOCK(spice.mouse.lock);
   switch(button)
   {
     case SPICE_MOUSE_BUTTON_LEFT   : spice.mouse.buttonState |= SPICE_MOUSE_BUTTON_MASK_LEFT   ; break;
@@ -1435,6 +1444,7 @@ bool spice_mouse_press(uint32_t button)
 
   msg->button       = button;
   msg->button_state = spice.mouse.buttonState;
+  SPICE_UNLOCK(spice.mouse.lock);
 
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
@@ -1446,6 +1456,7 @@ bool spice_mouse_release(uint32_t button)
   if (!spice.scInputs.connected)
     return false;
 
+  SPICE_LOCK(spice.mouse.lock);
   switch(button)
   {
     case SPICE_MOUSE_BUTTON_LEFT   : spice.mouse.buttonState &= ~SPICE_MOUSE_BUTTON_MASK_LEFT   ; break;
@@ -1460,6 +1471,7 @@ bool spice_mouse_release(uint32_t button)
 
   msg->button       = button;
   msg->button_state = spice.mouse.buttonState;
+  SPICE_UNLOCK(spice.mouse.lock);
 
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
