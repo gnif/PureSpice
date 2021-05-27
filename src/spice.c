@@ -69,6 +69,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   (header + 1); \
 })
 
+#define SPICE_SET_PACKET_SIZE(packet, sz) \
+{ \
+   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
+      sizeof(SpiceMiniDataHeader)); \
+   header->size = sz; \
+}
+
 #define SPICE_PACKET(htype, payloadType, extraData) \
   ((payloadType *)SPICE_RAW_PACKET(htype, sizeof(payloadType), extraData))
 
@@ -1191,15 +1198,20 @@ bool spice_agent_write_msg(const void * buffer, ssize_t size)
 {
   assert(size <= spice.agentMsg);
 
+  // allocate the data packet on the stack
+  void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, 0);
+
   while(size)
   {
     const ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE ?
       VD_AGENT_MAX_DATA_SIZE : size;
 
-    void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, toWrite);
+    // set the payload size in the packet and send it
+    SPICE_SET_PACKET_SIZE(p, toWrite);
     if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
       goto err;
 
+    // write the payload
     if (spice_write_nl(&spice.scMain, buffer, toWrite) != toWrite)
       goto err;
 
