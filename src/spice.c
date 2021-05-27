@@ -684,7 +684,7 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
       return status;
     }
 
-    atomic_store(&spice.serverTokens, num_tokens);
+    atomic_fetch_add(&spice.serverTokens, num_tokens);
     return SPICE_STATUS_OK;
   }
 
