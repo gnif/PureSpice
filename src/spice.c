@@ -159,7 +159,7 @@ struct Spice
   union SpiceAddr addr;
 
   bool     hasAgent;
-  uint32_t serverTokens;
+  _Atomic(uint32_t) serverTokens;
   uint32_t sessionID;
   uint32_t channelID;
   ssize_t  agentMsg;
@@ -553,8 +553,8 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 
     spice.sessionID = msg.session_id;
 
-    spice.serverTokens = msg.agent_tokens;
-    spice.hasAgent     = msg.agent_connected;
+    atomic_store(&spice.serverTokens, msg.agent_tokens);
+    spice.hasAgent = msg.agent_connected;
     if (spice.hasAgent && (status = spice_agent_connect()) != SPICE_STATUS_OK)
     {
       spice_disconnect();
@@ -632,8 +632,8 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
       return status;
     }
 
-    spice.hasAgent    = true;
-    spice.serverTokens = num_tokens;
+    spice.hasAgent = true;
+    atomic_store(&spice.serverTokens, num_tokens);
     if ((status = spice_agent_connect()) != SPICE_STATUS_OK)
     {
       spice_disconnect();
@@ -684,7 +684,7 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
       return status;
     }
 
-    spice.serverTokens = num_tokens;
+    atomic_store(&spice.serverTokens, num_tokens);
     return SPICE_STATUS_OK;
   }
 
@@ -1179,6 +1179,13 @@ bool spice_agent_start_msg(uint32_t type, ssize_t size)
   msg->size      = size;
   spice.agentMsg = size;
 
+  // observe flow control
+  while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
+    usleep(1000);
+  if (!spice.scMain.connected)
+    return false;
+  atomic_fetch_sub(&spice.serverTokens, 1);
+
   SPICE_LOCK(spice.scMain.lock);
   if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
   {
@@ -1208,6 +1215,14 @@ bool spice_agent_write_msg(const void * buffer, ssize_t size)
 
     // set the payload size in the packet and send it
     SPICE_SET_PACKET_SIZE(p, toWrite);
+
+    // observe flow control
+    while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
+      usleep(1000);
+    if (!spice.scMain.connected)
+      return false;
+    atomic_fetch_sub(&spice.serverTokens, 1);
+
     if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
       goto err;
 
