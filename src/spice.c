@@ -1168,6 +1168,26 @@ SPICE_STATUS spice_agent_send_caps(bool request)
 
 // ============================================================================
 
+bool spice_take_server_token(void)
+{
+  uint32_t tokens = atomic_load(&spice.serverTokens);
+  do
+  {
+    if (!spice.scMain.connected)
+      return false;
+
+    if (tokens == 0)
+    {
+      usleep(1);
+      tokens = atomic_load(&spice.serverTokens);
+      continue;
+    }
+  } while (!atomic_compare_exchange_weak(&spice.serverTokens, &tokens, tokens - 1));
+  return true;
+}
+
+// ============================================================================
+
 bool spice_agent_start_msg(uint32_t type, ssize_t size)
 {
   VDAgentMessage * msg =
@@ -1179,12 +1199,8 @@ bool spice_agent_start_msg(uint32_t type, ssize_t size)
   msg->size      = size;
   spice.agentMsg = size;
 
-  // observe flow control
-  while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-    usleep(1);
-  if (!spice.scMain.connected)
+  if (!spice_take_server_token())
     return false;
-  atomic_fetch_sub(&spice.serverTokens, 1);
 
   SPICE_LOCK(spice.scMain.lock);
   if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
@@ -1216,12 +1232,8 @@ bool spice_agent_write_msg(const void * buffer, ssize_t size)
     // set the payload size in the packet and send it
     SPICE_SET_PACKET_SIZE(p, toWrite);
 
-    // observe flow control
-    while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-      usleep(1);
-    if (!spice.scMain.connected)
+    if (!spice_take_server_token())
       return false;
-    atomic_fetch_sub(&spice.serverTokens, 1);
 
     if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
       goto err;
