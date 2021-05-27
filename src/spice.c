@@ -1181,7 +1181,7 @@ bool spice_agent_start_msg(uint32_t type, ssize_t size)
 
   // observe flow control
   while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-    usleep(1000);
+    usleep(1);
   if (!spice.scMain.connected)
     return false;
   atomic_fetch_sub(&spice.serverTokens, 1);
@@ -1218,7 +1218,7 @@ bool spice_agent_write_msg(const void * buffer, ssize_t size)
 
     // observe flow control
     while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-      usleep(1000);
+      usleep(1);
     if (!spice.scMain.connected)
       return false;
     atomic_fetch_sub(&spice.serverTokens, 1);
