@@ -1,0 +1,33 @@
+/*
+PureSpice - A pure C implementation of the SPICE client protocol
+Copyright (C) 2017-2021 Geoffrey McRae <geoff@hostfission.com>
+https://github.com/gnif/PureSpice
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation; either version 2 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA 02111-1307 USA
+*/
+
+#ifndef _H_SPICE_QUEUE_
+#define _H_SPICE_QUEUE_
+
+#include <stdbool.h>
+
+struct Queue;
+
+struct Queue * queue_new(void);
+void queue_free(struct Queue * list);
+void queue_push(struct Queue * list, void * data);
+bool queue_shift(struct Queue * list, void ** data);
+bool queue_peek(struct Queue * list, void ** data);
+
+#endif

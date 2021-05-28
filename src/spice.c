@@ -41,26 +41,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/protocol.h>
 #include <spice/vd_agent.h>
 
+#include "locking.h"
 #include "messages.h"
 #include "rsa.h"
-
-#define SPICE_LOCK_INIT(x) \
-  atomic_flag_clear(&(x))
-
-#define SPICE_LOCK(x) \
-  while(atomic_flag_test_and_set_explicit(&(x), memory_order_acquire)) { ; }
-
-#define SPICE_UNLOCK(x) \
-  atomic_flag_clear_explicit(&(x), memory_order_release);
+#include "queue.h"
 
 // we don't really need flow control because we are all local
 // instead do what the spice-gtk library does and provide the largest
 // possible number
 #define SPICE_AGENT_TOKENS_MAX ~0
 
-#define SPICE_RAW_PACKET(htype, dataSize, extraData) \
+#define _SPICE_RAW_PACKET(htype, dataSize, extraData, _alloc) \
 ({ \
-  uint8_t * packet = alloca(sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + dataSize); \
+  uint8_t * packet = _alloc(sizeof(ssize_t) + sizeof(SpiceMiniDataHeader) + dataSize); \
   ssize_t * sz = (ssize_t*)packet; \
   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(sz + 1); \
   *sz          = sizeof(SpiceMiniDataHeader) + dataSize; \
@@ -68,6 +61,20 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   header->size = dataSize + extraData; \
   (header + 1); \
 })
+
+#define SPICE_RAW_PACKET(htype, dataSize, extraData) \
+  _SPICE_RAW_PACKET(htype, dataSize, extraData, alloca)
+
+#define SPICE_RAW_PACKET_MALLOC(htype, dataSize, extraData) \
+  _SPICE_RAW_PACKET(htype, dataSize, extraData, malloc)
+
+#define SPICE_RAW_PACKET_FREE(packet) \
+{ \
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
+      sizeof(SpiceMiniDataHeader)); \
+  ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
+  free(sz); \
+}
 
 #define SPICE_SET_PACKET_SIZE(packet, sz) \
 { \
@@ -78,6 +85,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #define SPICE_PACKET(htype, payloadType, extraData) \
   ((payloadType *)SPICE_RAW_PACKET(htype, sizeof(payloadType), extraData))
+
+#define SPICE_PACKET_MALLOC(htype, payloadType, extraData) \
+  ((payloadType *)SPICE_RAW_PACKET_MALLOC(htype, sizeof(payloadType), extraData))
 
 #define SPICE_SEND_PACKET(channel, packet) \
 ({ \
@@ -187,6 +197,8 @@ struct Spice
 
   uint8_t * motionBuffer;
   size_t    motionBufferSize;
+
+  struct Queue * agentQueue;
 };
 
 // globals
@@ -210,6 +222,7 @@ SPICE_STATUS spice_on_main_channel_read  (int * dataAvailable);
 SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable);
 
 SPICE_STATUS spice_agent_process  (uint32_t dataSize, int * dataAvailable);
+bool         spice_agent_process_queue(void);
 SPICE_STATUS spice_agent_connect  ();
 SPICE_STATUS spice_agent_send_caps(bool request);
 void         spice_agent_on_clipboard();
@@ -277,6 +290,15 @@ void spice_disconnect()
   {
     free(spice.motionBuffer);
     spice.motionBuffer = NULL;
+  }
+
+  if (spice.agentQueue)
+  {
+    void * msg;
+    while(queue_shift(spice.agentQueue, &msg))
+      SPICE_RAW_PACKET_FREE(msg);
+    queue_free(spice.agentQueue);
+    spice.agentQueue = NULL;
   }
 }
 
@@ -685,6 +707,12 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
     }
 
     atomic_fetch_add(&spice.serverTokens, num_tokens);
+    if (!spice_agent_process_queue())
+    {
+      spice_disconnect();
+      return SPICE_STATUS_ERROR;
+    }
+
     return SPICE_STATUS_OK;
   }
 
@@ -954,6 +982,15 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
 
 SPICE_STATUS spice_agent_connect()
 {
+  if (!spice.agentQueue)
+    spice.agentQueue = queue_new();
+  else
+  {
+    void * msg;
+    while(queue_shift(spice.agentQueue, &msg))
+      SPICE_RAW_PACKET_FREE(msg);
+  }
+
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   memcpy(packet, &(uint32_t){SPICE_AGENT_TOKENS_MAX}, sizeof(uint32_t));
   if (!SPICE_SEND_PACKET(&spice.scMain, packet))
@@ -1168,35 +1205,59 @@ SPICE_STATUS spice_agent_send_caps(bool request)
 
 // ============================================================================
 
+bool spice_take_server_token(void)
+{
+  uint32_t tokens;
+  do
+  {
+    if (!spice.scMain.connected)
+      return false;
+
+    tokens = atomic_load(&spice.serverTokens);
+    if (tokens == 0)
+      return false;
+  }
+  while(!atomic_compare_exchange_weak(&spice.serverTokens, &tokens, tokens - 1));
+
+  return true;
+}
+
+// ============================================================================
+
+bool spice_agent_process_queue(void)
+{
+  SPICE_LOCK(spice.scMain.lock);
+  while (queue_peek(spice.agentQueue, NULL) && spice_take_server_token())
+  {
+    void * msg;
+    queue_shift(spice.agentQueue, &msg);
+    if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
+    {
+      SPICE_RAW_PACKET_FREE(msg);
+      SPICE_UNLOCK(spice.scMain.lock);
+      return false;
+    }
+    SPICE_RAW_PACKET_FREE(msg);
+  }
+  SPICE_UNLOCK(spice.scMain.lock);
+  return true;
+}
+
+// ============================================================================
+
 bool spice_agent_start_msg(uint32_t type, ssize_t size)
 {
   VDAgentMessage * msg =
-    SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
+    SPICE_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
 
   msg->protocol  = VD_AGENT_PROTOCOL;
   msg->type      = type;
   msg->opaque    = 0;
   msg->size      = size;
   spice.agentMsg = size;
+  queue_push(spice.agentQueue, msg);
 
-  // observe flow control
-  while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-    usleep(1);
-  if (!spice.scMain.connected)
-    return false;
-  atomic_fetch_sub(&spice.serverTokens, 1);
-
-  SPICE_LOCK(spice.scMain.lock);
-  if (!SPICE_SEND_PACKET_NL(&spice.scMain, msg))
-  {
-    SPICE_UNLOCK(spice.scMain.lock);
-    return false;
-  }
-
-  if (size == 0)
-    SPICE_UNLOCK(spice.scMain.lock);
-
-  return true;
+  return spice_agent_process_queue();
 }
 
 // ============================================================================
@@ -1205,44 +1266,21 @@ bool spice_agent_write_msg(const void * buffer, ssize_t size)
 {
   assert(size <= spice.agentMsg);
 
-  // allocate the data packet on the stack
-  void * p = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_AGENT_DATA, 0, 0);
-
   while(size)
   {
     const ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE ?
       VD_AGENT_MAX_DATA_SIZE : size;
 
-    // set the payload size in the packet and send it
-    SPICE_SET_PACKET_SIZE(p, toWrite);
-
-    // observe flow control
-    while(spice.scMain.connected && atomic_load(&spice.serverTokens) == 0)
-      usleep(1);
-    if (!spice.scMain.connected)
-      return false;
-    atomic_fetch_sub(&spice.serverTokens, 1);
-
-    if (!SPICE_SEND_PACKET_NL(&spice.scMain, p))
-      goto err;
-
-    // write the payload
-    if (spice_write_nl(&spice.scMain, buffer, toWrite) != toWrite)
-      goto err;
+    void * msg = SPICE_RAW_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, toWrite, 0);
+    memcpy(msg, buffer, toWrite);
+    queue_push(spice.agentQueue, msg);
 
     size           -= toWrite;
     buffer         += toWrite;
     spice.agentMsg -= toWrite;
   }
 
-  if (!spice.agentMsg)
-    SPICE_UNLOCK(spice.scMain.lock);
-
-  return true;
-
-err:
-  SPICE_UNLOCK(spice.scMain.lock);
-  return false;
+  return spice_agent_process_queue();
 }
 
 // ============================================================================

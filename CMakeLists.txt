@@ -14,6 +14,7 @@ add_definitions(-D USE_NETTLE)
 add_library(purespice STATIC
 	src/spice.c
 	src/rsa.c
+	src/queue.c
 )
 
 target_link_libraries(purespice
