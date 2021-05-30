@@ -1608,27 +1608,41 @@ bool spice_set_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData 
 
 // ============================================================================
 
-bool spice_clipboard_grab(SpiceDataType type)
+bool spice_clipboard_grab(SpiceDataType types[], int count)
 {
-  if (type == SPICE_DATA_NONE)
+  if (count == 0)
     return false;
 
   if (spice.cbSelection)
   {
-    uint8_t req[8] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
-    ((uint32_t*)req)[1] = spice_type_to_agent_type(type);
+    struct Msg
+    {
+      uint8_t  selection;
+      uint8_t  reserved;
+      uint32_t types[0];
+    };
 
-    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(req)) ||
-        !spice_agent_write_msg(req, sizeof(req)))
+    const int size = sizeof(struct Msg) + count * sizeof(uint32_t);
+    struct Msg * msg = alloca(size);
+    msg->selection = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
+    msg->reserved  = 0;
+    for(int i = 0; i < count; ++i)
+      msg->types[i] = spice_type_to_agent_type(types[i]);
+
+    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, size) ||
+        !spice_agent_write_msg(msg, size))
       return false;
 
     spice.cbClientGrabbed = true;
     return true;
   }
 
-  uint32_t req = spice_type_to_agent_type(type);
-  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(req)) ||
-      !spice_agent_write_msg(&req, sizeof(req)))
+  uint32_t msg[count];
+  for(int i = 0; i < count; ++i)
+    msg[i] = spice_type_to_agent_type(types[i]);
+
+  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(msg)) ||
+      !spice_agent_write_msg(&msg, sizeof(msg)))
     return false;
 
   spice.cbClientGrabbed = true;

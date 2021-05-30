@@ -59,7 +59,7 @@ bool spice_mouse_press   (uint32_t button);
 bool spice_mouse_release (uint32_t button);
 
 bool spice_clipboard_request(SpiceDataType type);
-bool spice_clipboard_grab   (SpiceDataType type);
+bool spice_clipboard_grab(SpiceDataType types[], int count);
 bool spice_clipboard_release();
 
 bool spice_clipboard_data_start(SpiceDataType type, size_t size);
