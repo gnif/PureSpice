@@ -300,6 +300,8 @@ void spice_disconnect()
     queue_free(spice.agentQueue);
     spice.agentQueue = NULL;
   }
+
+  spice.hasAgent = false;
 }
 
 // ============================================================================
@@ -576,8 +578,7 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
     spice.sessionID = msg.session_id;
 
     atomic_store(&spice.serverTokens, msg.agent_tokens);
-    spice.hasAgent = msg.agent_connected;
-    if (spice.hasAgent && (status = spice_agent_connect()) != SPICE_STATUS_OK)
+    if (msg.agent_connected && (status = spice_agent_connect()) != SPICE_STATUS_OK)
     {
       spice_disconnect();
       return status;
@@ -636,7 +637,6 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
   {
-    spice.hasAgent = true;
     if ((status = spice_agent_connect()) != SPICE_STATUS_OK)
     {
       spice_disconnect();
@@ -654,7 +654,6 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
       return status;
     }
 
-    spice.hasAgent = true;
     atomic_store(&spice.serverTokens, num_tokens);
     if ((status = spice_agent_connect()) != SPICE_STATUS_OK)
     {
@@ -996,7 +995,12 @@ SPICE_STATUS spice_agent_connect()
   if (!SPICE_SEND_PACKET(&spice.scMain, packet))
     return SPICE_STATUS_ERROR;
 
-  return spice_agent_send_caps(true);
+  SPICE_STATUS ret = spice_agent_send_caps(true);
+  if (ret != SPICE_STATUS_OK)
+    return ret;
+
+  spice.hasAgent = true;
+  return SPICE_STATUS_OK;
 }
 
 // ============================================================================
