@@ -995,11 +995,14 @@ SPICE_STATUS spice_agent_connect()
   if (!SPICE_SEND_PACKET(&spice.scMain, packet))
     return SPICE_STATUS_ERROR;
 
+  spice.hasAgent = true;
   SPICE_STATUS ret = spice_agent_send_caps(true);
   if (ret != SPICE_STATUS_OK)
+  {
+    spice.hasAgent = false;
     return ret;
+  }
 
-  spice.hasAgent = true;
   return SPICE_STATUS_OK;
 }
 
@@ -1192,6 +1195,9 @@ void spice_agent_on_clipboard()
 
 SPICE_STATUS spice_agent_send_caps(bool request)
 {
+  if (!spice.hasAgent)
+    return SPICE_STATUS_ERROR;
+
   const ssize_t capsSize = sizeof(VDAgentAnnounceCapabilities) + VD_AGENT_CAPS_BYTES;
   VDAgentAnnounceCapabilities *caps = (VDAgentAnnounceCapabilities *)alloca(capsSize);
   memset(caps, 0, capsSize);
@@ -1579,6 +1585,9 @@ static SpiceDataType agent_type_to_spice_type(uint32_t type)
 
 bool spice_clipboard_request(SpiceDataType type)
 {
+  if (!spice.hasAgent)
+    return false;
+
   VDAgentClipboardRequest req;
 
   if (!spice.cbAgentGrabbed)
@@ -1614,6 +1623,9 @@ bool spice_set_clipboard_cb(SpiceClipboardNotice cbNoticeFn, SpiceClipboardData 
 
 bool spice_clipboard_grab(SpiceDataType types[], int count)
 {
+  if (!spice.hasAgent)
+    return false;
+
   if (count == 0)
     return false;
 
@@ -1657,6 +1669,9 @@ bool spice_clipboard_grab(SpiceDataType types[], int count)
 
 bool spice_clipboard_release()
 {
+  if (!spice.hasAgent)
+    return false;
+
   // check if if there is anything to release first
   if (!spice.cbClientGrabbed)
     return true;
@@ -1683,6 +1698,9 @@ bool spice_clipboard_release()
 
 bool spice_clipboard_data_start(SpiceDataType type, size_t size)
 {
+  if (!spice.hasAgent)
+    return false;
+
   uint8_t buffer[8];
   size_t  bufSize;
 
@@ -1707,5 +1725,8 @@ bool spice_clipboard_data_start(SpiceDataType type, size_t size)
 
 bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
 {
+  if (!spice.hasAgent)
+    return false;
+
   return spice_agent_write_msg(data, size);
 }
