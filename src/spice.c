@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/un.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
@@ -138,6 +138,8 @@ struct SpiceChannel
   uint32_t    ackFrequency;
   uint32_t    ackCount;
   atomic_flag lock;
+
+  SPICE_STATUS (*read)(int * dataAvailable);
 };
 
 struct SpiceKeyboard
@@ -174,6 +176,7 @@ struct Spice
   uint32_t channelID;
   ssize_t  agentMsg;
 
+  int      epollfd;
   struct   SpiceChannel scMain;
   struct   SpiceChannel scInputs;
 
@@ -201,14 +204,20 @@ struct Spice
   struct Queue * agentQueue;
 };
 
+static SPICE_STATUS spice_on_common_read        (struct SpiceChannel * channel, SpiceMiniDataHeader * header, int * dataAvailable);
+static SPICE_STATUS spice_on_main_channel_read  (int * dataAvailable);
+static SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable);
+
 // globals
 struct Spice spice =
 {
   .sessionID            = 0,
   .scMain  .connected   = false,
   .scMain  .channelType = SPICE_CHANNEL_MAIN,
+  .scMain  .read        = spice_on_main_channel_read,
   .scInputs.connected   = false,
   .scInputs.channelType = SPICE_CHANNEL_INPUTS,
+  .scInputs.read        = spice_on_inputs_channel_read
 };
 
 // internal forward decls
@@ -216,10 +225,6 @@ SPICE_STATUS spice_connect_channel   (struct SpiceChannel * channel);
 void         spice_disconnect_channel(struct SpiceChannel * channel);
 
 bool spice_process_ack(struct SpiceChannel * channel);
-
-SPICE_STATUS spice_on_common_read        (struct SpiceChannel * channel, SpiceMiniDataHeader * header, int * dataAvailable);
-SPICE_STATUS spice_on_main_channel_read  (int * dataAvailable);
-SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable);
 
 SPICE_STATUS spice_agent_process  (uint32_t dataSize, int * dataAvailable);
 bool         spice_agent_process_queue(void);
@@ -272,9 +277,16 @@ bool spice_connect(const char * host, const unsigned short port, const char * pa
     spice.addr.in.sin_port   = htons(port);
   }
 
+  spice.epollfd = epoll_create1(0);
+  if (spice.epollfd < 0)
+    perror("epoll_create1 failed!\n");
+
   spice.channelID = 0;
   if (spice_connect_channel(&spice.scMain) != SPICE_STATUS_OK)
+  {
+    close(spice.epollfd);
     return false;
+  }
 
   return true;
 }
@@ -285,6 +297,7 @@ void spice_disconnect()
 {
   spice_disconnect_channel(&spice.scInputs);
   spice_disconnect_channel(&spice.scMain  );
+  close(spice.epollfd);
 
   if (spice.motionBuffer)
   {
@@ -316,110 +329,49 @@ bool spice_ready()
 
 bool spice_process(int timeout)
 {
-  int fds = 0;
-  fd_set readSet;
-  FD_ZERO(&readSet);
+  #define MAX_EVENTS 4
+  static struct epoll_event events[MAX_EVENTS];
 
-  bool mainConnected   = false;
-  bool inputsConnected = false;
-
-  if (spice.scMain.connected)
-  {
-    mainConnected = true;
-    FD_SET(spice.scMain.socket, &readSet);
-    if (spice.scMain.socket > fds)
-      fds = spice.scMain.socket;
-  }
-
-  if (spice.scInputs.connected)
-  {
-    inputsConnected = true;
-    FD_SET(spice.scInputs.socket, &readSet);
-    if (spice.scInputs.socket > fds)
-      fds = spice.scInputs.socket;
-  }
-
-  struct timeval tv;
-  tv.tv_sec  = timeout / 1000;
-  tv.tv_usec = (timeout % 1000) * 1000;
-
-  int rc = select(fds + 1, &readSet, NULL, NULL, &tv);
-  if (rc == 0)
+  int nfds = epoll_wait(spice.epollfd, events, MAX_EVENTS, timeout);
+  if (nfds == 0)
     return true;
 
-  if (rc < 0)
+  if (nfds < 0)
     return false;
 
-  if (FD_ISSET(spice.scInputs.socket, &readSet))
+  for(int i = 0; i < nfds; ++i)
   {
-    // note: dataAvailable can go negative due to blocking reads
+    struct SpiceChannel * channel = (struct SpiceChannel *)events[i].data.ptr;
+
     int dataAvailable;
-    ioctl(spice.scInputs.socket, FIONREAD, &dataAvailable);
-
-    // if there is no data then the socket is closed
+    ioctl(channel->socket, FIONREAD, &dataAvailable);
     if (!dataAvailable)
-      spice.scInputs.connected = false;
-
-    // process as much data as possible
-    while(dataAvailable > 0)
-    {
-      switch(spice_on_inputs_channel_read(&dataAvailable))
+      channel->connected = false;
+    else
+      while(dataAvailable > 0)
       {
-        case SPICE_STATUS_OK:
-        case SPICE_STATUS_HANDLED:
-          // if dataAvailable has gone negative then refresh it
-          if (dataAvailable < 0)
-            ioctl(spice.scInputs.socket, FIONREAD, &dataAvailable);
-          break;
+        switch(channel->read(&dataAvailable))
+        {
+          case SPICE_STATUS_OK:
+          case SPICE_STATUS_HANDLED:
+            // if dataAvailable has gone negative then refresh it
+            if (dataAvailable < 0)
+              ioctl(channel->socket, FIONREAD, &dataAvailable);
+            break;
 
-        case SPICE_STATUS_NODATA:
-          spice.scInputs.connected = false;
-          dataAvailable = 0;
-          break;
+          case SPICE_STATUS_NODATA:
+            channel->connected = false;
+            close(channel->socket);
+            dataAvailable = 0;
+            break;
 
-        case SPICE_STATUS_ERROR:
+          default:
+            return false;
+        }
+
+        if (channel->connected && !spice_process_ack(channel))
           return false;
       }
-
-      if (!spice_process_ack(&spice.scInputs))
-        return false;
-    }
-  }
-
-  if (FD_ISSET(spice.scMain.socket, &readSet))
-  {
-    // note: dataAvailable can go negative due to blocking reads
-    int dataAvailable;
-    ioctl(spice.scMain.socket, FIONREAD, &dataAvailable);
-
-    // if there is no data then the socket is closed
-    if (!dataAvailable)
-      spice.scMain.connected = false;
-
-    // process as much data as possible
-    while(dataAvailable > 0)
-    {
-      switch(spice_on_main_channel_read(&dataAvailable))
-      {
-        case SPICE_STATUS_OK:
-        case SPICE_STATUS_HANDLED:
-          // if dataAvailable has gone negative then refresh it
-          if (dataAvailable < 0)
-            ioctl(spice.scInputs.socket, FIONREAD, &dataAvailable);
-          break;
-
-        case SPICE_STATUS_NODATA:
-          spice.scMain.connected = false;
-          dataAvailable = 0;
-          break;
-
-        default:
-          return false;
-      }
-
-      if (!spice_process_ack(&spice.scMain))
-        return false;
-    }
   }
 
   if (spice.scMain.connected || spice.scInputs.connected)
@@ -439,10 +391,10 @@ bool spice_process(int timeout)
   spice.cbAgentGrabbed  = false;
   spice.cbClientGrabbed = false;
 
-  if (inputsConnected)
+  if (spice.scInputs.connected)
     close(spice.scInputs.socket);
 
-  if (mainConnected)
+  if (spice.scMain.connected)
     close(spice.scMain.socket);
 
   return false;
@@ -467,7 +419,7 @@ bool spice_process_ack(struct SpiceChannel * channel)
 
 // ============================================================================
 
-SPICE_STATUS spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * header, int * dataAvailable)
+static SPICE_STATUS spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHeader * header, int * dataAvailable)
 {
   SPICE_STATUS status;
   if ((status = spice_read_nl(channel, header, sizeof(SpiceMiniDataHeader), dataAvailable)) != SPICE_STATUS_OK)
@@ -549,7 +501,7 @@ SPICE_STATUS spice_on_common_read(struct SpiceChannel * channel, SpiceMiniDataHe
 
 // ============================================================================
 
-SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
+static SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 {
   struct SpiceChannel *channel = &spice.scMain;
 
@@ -720,7 +672,7 @@ SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 
 // ============================================================================
 
-SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable)
+static SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable)
 {
   struct SpiceChannel *channel = &spice.scInputs;
 
@@ -939,6 +891,13 @@ SPICE_STATUS spice_connect_channel(struct SpiceChannel * channel)
     return SPICE_STATUS_ERROR;
   }
 
+  struct epoll_event ev =
+  {
+    .events   = EPOLLIN,
+    .data.ptr = channel
+  };
+  epoll_ctl(spice.epollfd, EPOLL_CTL_ADD, channel->socket, &ev);
+
   channel->ready = true;
   return SPICE_STATUS_OK;
 }
@@ -974,6 +933,7 @@ void spice_disconnect_channel(struct SpiceChannel * channel)
     }
   }
 
+  epoll_ctl(spice.epollfd, EPOLL_CTL_DEL, channel->socket, NULL);
   shutdown(channel->socket, SHUT_WR);
 }
 
