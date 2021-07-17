@@ -345,6 +345,7 @@ bool spice_process(int timeout)
 
     int dataAvailable;
     ioctl(channel->socket, FIONREAD, &dataAvailable);
+
     if (!dataAvailable)
       channel->connected = false;
     else
@@ -1413,6 +1414,23 @@ bool spice_mouse_motion(int32_t x, int32_t y)
 
   const unsigned delta = abs(x) > abs(y) ? abs(x) : abs(y);
   const unsigned msgs  = (delta + 126) / 127;
+
+  // only one message, so just send it normally
+  if (msgs == 1)
+  {
+    SpiceMsgcMouseMotion * msg =
+      SPICE_PACKET(SPICE_MSGC_INPUTS_MOUSE_MOTION, SpiceMsgcMouseMotion, 0);
+
+    SPICE_LOCK(spice.mouse.lock);
+    msg->x            = x;
+    msg->y            = y;
+    msg->button_state = spice.mouse.buttonState;
+    SPICE_UNLOCK(spice.mouse.lock);
+
+    atomic_fetch_add(&spice.mouse.sentCount, 1);
+    return SPICE_SEND_PACKET(&spice.scInputs, msg);
+  }
+
   const ssize_t bufferSize = (
     sizeof(SpiceMiniDataHeader ) +
     sizeof(SpiceMsgcMouseMotion)
