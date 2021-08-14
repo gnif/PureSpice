@@ -1,0 +1,31 @@
+name: build
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+        build_type: [Release, Debug]
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - name: Update apt
+      run: |
+        sudo apt-get update
+    - name: Install PureSpice dependencies
+      run: |
+        sudo apt-get install libspice-protocol-dev nettle-dev
+    - name: Configure PureSpice
+      env:
+        CC: /usr/bin/${{ matrix.cc }}
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} ..
+    - name: Build PureSpice
+      run: |
+        cd build
+        make -j$(nproc)
