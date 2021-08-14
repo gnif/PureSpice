@@ -1363,6 +1363,19 @@ bool spice_key_up(uint32_t code)
 
 // ============================================================================
 
+bool spice_key_modifiers(uint32_t modifiers)
+{
+  if (!spice.scInputs.connected)
+    return false;
+
+  SpiceMsgcInputsKeyModifiers * msg =
+    SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_MODIFIERS, SpiceMsgcInputsKeyModifiers, 0);
+  msg->modifiers = modifiers;
+  return SPICE_SEND_PACKET(&spice.scInputs, msg);
+}
+
+// ============================================================================
+
 bool spice_mouse_mode(bool server)
 {
   if (!spice.scMain.connected)
