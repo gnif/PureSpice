@@ -52,6 +52,7 @@ bool spice_ready();
 
 bool spice_key_down      (uint32_t code);
 bool spice_key_up        (uint32_t code);
+bool spice_key_modifiers (uint32_t modifiers);
 bool spice_mouse_mode    (bool     server);
 bool spice_mouse_position(uint32_t x, uint32_t y);
 bool spice_mouse_motion  ( int32_t x,  int32_t y);
