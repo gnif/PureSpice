@@ -1233,10 +1233,11 @@ bool spice_agent_start_msg(uint32_t type, ssize_t size)
 
 // ============================================================================
 
-bool spice_agent_write_msg(const void * buffer, ssize_t size)
+bool spice_agent_write_msg(const void * buffer_, ssize_t size)
 {
   assert(size <= spice.agentMsg);
 
+  const char * buffer = buffer_;
   while(size)
   {
     const ssize_t toWrite = size > VD_AGENT_MAX_DATA_SIZE ?
