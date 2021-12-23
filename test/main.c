@@ -64,7 +64,7 @@ int main(int argc, char * argv[])
 
   printf("attempting to connect to %s:%d...", host, port);
   fflush(stdout);
-  if (!spice_connect(host, port, ""))
+  if (!spice_connect(host, port, "", true))
   {
     printf("spice connect failed\n");
     retval = -1;

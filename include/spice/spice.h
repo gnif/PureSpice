@@ -35,6 +35,13 @@ typedef enum SpiceDataType
 }
 SpiceDataType;
 
+typedef enum PSAudioFormat
+{
+  PS_AUDIO_FMT_INVALID,
+  PS_AUDIO_FMT_S16
+}
+PSAudioFormat;
+
 typedef void (*SpiceClipboardNotice )(const SpiceDataType type);
 typedef void (*SpiceClipboardData   )(const SpiceDataType type,
     uint8_t * buffer, uint32_t size);
@@ -47,7 +54,7 @@ extern "C" {
 #endif
 
 bool spice_connect(const char * host, const unsigned short port,
-    const char * password);
+    const char * password, bool playback);
 void spice_disconnect();
 bool spice_process(int timeout);
 bool spice_ready();
@@ -74,6 +81,13 @@ bool spice_set_clipboard_cb(
     SpiceClipboardData    cbDataFn,
     SpiceClipboardRelease cbReleaseFn,
     SpiceClipboardRequest cbRequestFn);
+
+bool spice_set_audio_cb(
+  void (*start)(int channels, int sampleRate, PSAudioFormat format,
+    uint32_t time),
+  void (*stop)(void),
+  void (*data)(uint8_t * data, size_t size)
+);
 
 #ifdef __cplusplus
 }

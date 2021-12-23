@@ -178,6 +178,7 @@ struct Spice
   int      epollfd;
   struct   SpiceChannel scMain;
   struct   SpiceChannel scInputs;
+  struct   SpiceChannel scPlayback;
 
   struct SpiceKeyboard kb;
   struct SpiceMouse    mouse;
@@ -201,6 +202,12 @@ struct Spice
   size_t    motionBufferSize;
 
   struct Queue * agentQueue;
+
+  bool playback;
+  void (*playbackStart)(int channels, int sampleRate, PSAudioFormat format,
+    uint32_t time);
+  void (*playbackStop)(void);
+  void (*playbackData)(uint8_t * data, size_t size);
 };
 
 static SPICE_STATUS spice_on_common_read(struct SpiceChannel * channel,
@@ -210,16 +217,17 @@ static SPICE_STATUS spice_on_main_channel_read(int * dataAvailable);
 
 static SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable);
 
+static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable);
+
 // globals
 struct Spice spice =
 {
-  .sessionID            = 0,
-  .scMain  .connected   = false,
-  .scMain  .channelType = SPICE_CHANNEL_MAIN,
-  .scMain  .read        = spice_on_main_channel_read,
-  .scInputs.connected   = false,
-  .scInputs.channelType = SPICE_CHANNEL_INPUTS,
-  .scInputs.read        = spice_on_inputs_channel_read
+  .scMain    .channelType = SPICE_CHANNEL_MAIN,
+  .scMain    .read        = spice_on_main_channel_read,
+  .scInputs  .channelType = SPICE_CHANNEL_INPUTS,
+  .scInputs  .read        = spice_on_inputs_channel_read,
+  .scPlayback.channelType = SPICE_CHANNEL_PLAYBACK,
+  .scPlayback.read        = spice_on_playback_channel_read
 };
 
 // internal forward decls
@@ -262,10 +270,11 @@ static uint64_t get_timestamp()
 }
 
 bool spice_connect(const char * host, const unsigned short port,
-    const char * password)
+    const char * password, bool playback)
 {
   strncpy(spice.password, password, sizeof(spice.password) - 1);
   memset(&spice.addr, 0, sizeof(spice.addr));
+  spice.playback = playback;
 
   if (port == 0)
   {
@@ -576,19 +585,46 @@ static SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 
     for(int i = 0; i < msg.num_of_channels; ++i)
     {
-      if (channels[i].type == SPICE_CHANNEL_INPUTS)
+      switch(channels[i].type)
       {
-        if (spice.scInputs.connected)
-        {
-          spice_disconnect();
-          return SPICE_STATUS_ERROR;
-        }
+        case SPICE_CHANNEL_INPUTS:
+          if (spice.scInputs.connected)
+          {
+            spice_disconnect();
+            return SPICE_STATUS_ERROR;
+          }
 
-        if ((status = spice_connect_channel(&spice.scInputs)) != SPICE_STATUS_OK)
-        {
-          spice_disconnect();
-          return status;
-        }
+          if ((status = spice_connect_channel(&spice.scInputs))
+              != SPICE_STATUS_OK)
+          {
+            spice_disconnect();
+            return status;
+          }
+
+          if (spice.scPlayback.connected)
+            return SPICE_STATUS_OK;
+          break;
+
+        case SPICE_CHANNEL_PLAYBACK:
+          if (!spice.playback)
+            break;
+
+          if (spice.scPlayback.connected)
+          {
+            spice_disconnect();
+            return SPICE_STATUS_ERROR;
+          }
+
+          if ((status = spice_connect_channel(&spice.scPlayback))
+              != SPICE_STATUS_OK)
+          {
+            spice_disconnect();
+            return status;
+          }
+
+          if (spice.scInputs.connected)
+            return SPICE_STATUS_OK;
+          break;
       }
     }
 
@@ -728,6 +764,61 @@ static SPICE_STATUS spice_on_inputs_channel_read(int * dataAvailable)
       return (count >= SPICE_INPUT_MOTION_ACK_BUNCH) ?
         SPICE_STATUS_OK : SPICE_STATUS_ERROR;
     }
+  }
+
+  return spice_discard_nl(channel, header.size, dataAvailable);
+}
+
+static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable)
+{
+  struct SpiceChannel *channel = &spice.scPlayback;
+
+  SpiceMiniDataHeader header;
+
+  SPICE_STATUS status;
+  if ((status = spice_on_common_read(channel, &header,
+          dataAvailable)) != SPICE_STATUS_OK)
+    return status;
+
+  switch(header.type)
+  {
+    case SPICE_MSG_PLAYBACK_START:
+    {
+      SpiceMsgPlaybackStart in;
+      if ((status = spice_read_nl(channel, &in, sizeof(in),
+              dataAvailable)) != SPICE_STATUS_OK)
+        return status;
+
+      if (spice.playbackStart)
+      {
+        PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
+        if (in.format == SPICE_AUDIO_FMT_S16)
+          fmt = PS_AUDIO_FMT_S16;
+
+        spice.playbackStart(in.channels, in.frequency, fmt, in.time);
+      }
+      return SPICE_STATUS_OK;
+    }
+
+    case SPICE_MSG_PLAYBACK_DATA:
+    {
+      const int size = *dataAvailable;
+      SpiceMsgPlaybackPacket * in =
+        (SpiceMsgPlaybackPacket *)alloca(size);
+      if ((status = spice_read_nl(channel, in, size,
+              dataAvailable)) != SPICE_STATUS_OK)
+        return status;
+
+      if (spice.playbackData)
+        spice.playbackData((uint8_t*)(++in), size - sizeof(*in));
+
+      return SPICE_STATUS_OK;
+    }
+
+    case SPICE_MSG_PLAYBACK_STOP:
+      if (spice.playbackStop)
+        spice.playbackStop();
+      return SPICE_STATUS_OK;
   }
 
   return spice_discard_nl(channel, header.size, dataAvailable);
@@ -1722,4 +1813,21 @@ bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
     return false;
 
   return spice_agent_write_msg(data, size);
+}
+
+bool spice_set_audio_cb(
+  void (*start)(int channels, int sampleRate, PSAudioFormat format,
+    uint32_t time),
+  void (*stop)(void),
+  void (*data)(uint8_t * data, size_t size)
+)
+{
+  if (!start || !stop || !data)
+    return false;
+
+  spice.playbackStart = start;
+  spice.playbackStop  = stop;
+  spice.playbackData  = data;
+
+  return true;
 }

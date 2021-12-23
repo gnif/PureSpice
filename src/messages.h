@@ -139,6 +139,22 @@ typedef struct SpiceMsgcDisconnecting
 }
 SpiceMsgcDisconnecting;
 
+typedef struct SpiceMsgPlaybackStart
+{
+  uint32_t channels;
+  uint16_t format;
+  uint32_t frequency;
+  uint32_t time;
+}
+SpiceMsgPlaybackStart;
+
+typedef struct SpiceMsgPlaybackPacket
+{
+  uint32_t time;
+  //uint8_t data[];
+}
+SpiceMsgPlaybackPacket;
+
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
 #define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)
@@ -149,5 +165,8 @@ SpiceMsgcDisconnecting;
 #define MAIN_SET_CAPABILITY(caps, index) \
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
 
+#define PLAYBACK_CAPS_BYTES (((SPICE_PLAYBACK_CAP_OPUS + 32) / 8) & ~3)
+#define PLAYBACK_SET_CAPABILITY(caps, index) \
+    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
 
 #pragma pack(pop)
