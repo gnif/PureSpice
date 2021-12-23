@@ -63,7 +63,8 @@ static void sha1(uint8_t * hash, const uint8_t *data, unsigned int len)
   sha1_digest(&ctx, SHA1_HASH_LEN, hash);
 }
 
-static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, size_t mask_len)
+static void oaep_mask(uint8_t * dest, size_t dest_len,
+    const uint8_t * mask, size_t mask_len)
 {
   uint8_t   hash[SHA1_HASH_LEN];
   uint8_t * seed = alloca(mask_len + 4);
@@ -89,7 +90,8 @@ static void oaep_mask(uint8_t * dest, size_t dest_len, const uint8_t * mask, siz
   }
 }
 
-static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, unsigned int len)
+static bool oaep_pad(mpz_t m, unsigned int key_size,
+    const uint8_t * message, unsigned int len)
 {
   if (len + SHA1_HASH_LEN * 2 + 2 > key_size)
     return false;
@@ -125,7 +127,8 @@ static bool oaep_pad(mpz_t m, unsigned int key_size, const uint8_t * message, un
 }
 #endif
 
-bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice_password * result)
+bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password,
+    struct spice_password * result)
 {
   result->size = 0;
   result->data = NULL;
@@ -169,7 +172,8 @@ bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice
   struct asn1_der_iterator j;
   struct rsa_public_key    pub;
 
-  if (asn1_der_iterator_first(&der, SPICE_TICKET_PUBKEY_BYTES, pub_key) == ASN1_ITERATOR_CONSTRUCTED
+  if (asn1_der_iterator_first(&der, SPICE_TICKET_PUBKEY_BYTES, pub_key)
+      == ASN1_ITERATOR_CONSTRUCTED
       && der.type == ASN1_SEQUENCE
       && asn1_der_decode_constructed_last(&der) == ASN1_ITERATOR_CONSTRUCTED
       && der.type == ASN1_SEQUENCE

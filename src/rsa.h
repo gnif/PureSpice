@@ -26,5 +26,6 @@ struct spice_password
   unsigned int   size;
 };
 
-bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password, struct spice_password * result);
+bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password,
+    struct spice_password * result);
 void spice_rsa_free_password(struct spice_password * pass);
