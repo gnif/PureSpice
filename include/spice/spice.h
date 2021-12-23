@@ -36,7 +36,8 @@ typedef enum SpiceDataType
 SpiceDataType;
 
 typedef void (*SpiceClipboardNotice )(const SpiceDataType type);
-typedef void (*SpiceClipboardData   )(const SpiceDataType type, uint8_t * buffer, uint32_t size);
+typedef void (*SpiceClipboardData   )(const SpiceDataType type,
+    uint8_t * buffer, uint32_t size);
 typedef void (*SpiceClipboardRelease)();
 typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
 
@@ -45,7 +46,8 @@ typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
 extern "C" {
 #endif
 
-bool spice_connect(const char * host, const unsigned short port, const char * password);
+bool spice_connect(const char * host, const unsigned short port,
+    const char * password);
 void spice_disconnect();
 bool spice_process(int timeout);
 bool spice_ready();
