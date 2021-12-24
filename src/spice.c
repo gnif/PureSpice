@@ -802,15 +802,14 @@ static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable)
 
     case SPICE_MSG_PLAYBACK_DATA:
     {
-      const int size = *dataAvailable;
       SpiceMsgPlaybackPacket * in =
-        (SpiceMsgPlaybackPacket *)alloca(size);
-      if ((status = spice_read_nl(channel, in, size,
+        (SpiceMsgPlaybackPacket *)alloca(header.size);
+      if ((status = spice_read_nl(channel, in, header.size,
               dataAvailable)) != SPICE_STATUS_OK)
         return status;
 
       if (spice.playbackData)
-        spice.playbackData((uint8_t*)(++in), size - sizeof(*in));
+        spice.playbackData((uint8_t*)(++in), header.size - sizeof(*in));
 
       return SPICE_STATUS_OK;
     }
