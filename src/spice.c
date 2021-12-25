@@ -206,6 +206,8 @@ struct Spice
   bool playback;
   void (*playbackStart)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time);
+  void (*playbackVolume)(int channels, const uint16_t volume[]);
+  void (*playbackMute)(bool mute);
   void (*playbackStop)(void);
   void (*playbackData)(uint8_t * data, size_t size);
 };
@@ -818,6 +820,36 @@ static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable)
       if (spice.playbackStop)
         spice.playbackStop();
       return SPICE_STATUS_OK;
+
+    case SPICE_MSG_PLAYBACK_VOLUME:
+    {
+      SpiceMsgAudioVolume * in =
+        (SpiceMsgAudioVolume *)alloca(header.size);
+      if ((status = spice_read_nl(channel, in, header.size,
+              dataAvailable)) != SPICE_STATUS_OK)
+        return status;
+
+      if (spice.playbackVolume)
+      {
+        uint16_t * volume = (uint16_t *)(in + 1);
+        spice.playbackVolume(in->nchannels, volume);
+      }
+
+      return SPICE_STATUS_OK;
+    }
+
+    case SPICE_MSG_PLAYBACK_MUTE:
+    {
+      SpiceMsgAudioMute in;
+      if ((status = spice_read_nl(channel, &in, sizeof(in),
+              dataAvailable)) != SPICE_STATUS_OK)
+        return status;
+
+      if (spice.playbackMute)
+        spice.playbackMute(in.mute);
+
+      return SPICE_STATUS_OK;
+    }
   }
 
   return spice_discard_nl(channel, header.size, dataAvailable);
@@ -907,6 +939,9 @@ SPICE_STATUS spice_connect_channel(struct SpiceChannel * channel)
 
   if (channel == &spice.scMain)
     MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
+
+  if (channel == &spice.scPlayback)
+    PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
 
   if (spice_write_nl(channel, &p, sizeof(p)) != sizeof(p))
   {
@@ -1817,6 +1852,8 @@ bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size)
 bool spice_set_audio_cb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time),
+  void (*volume)(int channels, const uint16_t volume[]),
+  void (*mute)(bool mute),
   void (*stop)(void),
   void (*data)(uint8_t * data, size_t size)
 )
@@ -1824,9 +1861,11 @@ bool spice_set_audio_cb(
   if (!start || !stop || !data)
     return false;
 
-  spice.playbackStart = start;
-  spice.playbackStop  = stop;
-  spice.playbackData  = data;
+  spice.playbackStart  = start;
+  spice.playbackVolume = volume;
+  spice.playbackMute   = mute;
+  spice.playbackStop   = stop;
+  spice.playbackData   = data;
 
   return true;
 }

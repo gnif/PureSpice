@@ -85,6 +85,8 @@ bool spice_set_clipboard_cb(
 bool spice_set_audio_cb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time),
+  void (*volume)(int channels, const uint16_t volume[]),
+  void (*mute)(bool mute),
   void (*stop)(void),
   void (*data)(uint8_t * data, size_t size)
 );

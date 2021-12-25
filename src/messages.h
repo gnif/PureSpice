@@ -155,6 +155,19 @@ typedef struct SpiceMsgPlaybackPacket
 }
 SpiceMsgPlaybackPacket;
 
+typedef struct SpiceMsgAudioVolume
+{
+  uint8_t nchannels;
+//  uint16_t volume[nchannels];
+}
+SpiceMsgAudioVolume;
+
+typedef struct SpiceMsgAUdioMute
+{
+  uint8_t mute;
+}
+SpiceMsgAudioMute;
+
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
 #define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)
