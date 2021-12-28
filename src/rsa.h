@@ -20,12 +20,13 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
-struct spice_password
+typedef struct PSPassword
 {
   char         * data;
   unsigned int   size;
-};
+}
+PSPassword;
 
-bool spice_rsa_encrypt_password(uint8_t * pub_key, char * password,
-    struct spice_password * result);
-void spice_rsa_free_password(struct spice_password * pass);
+bool purespice_rsa_encrypt_password(uint8_t * pub_key, char * password,
+    PSPassword * result);
+void purespice_rsa_free_password(PSPassword * pass);

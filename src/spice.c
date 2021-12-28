@@ -210,54 +210,54 @@ struct PS
   void (*playbackData)(uint8_t * data, size_t size);
 };
 
-static PS_STATUS spice_on_common_read(struct PSChannel * channel,
+static PS_STATUS purespice_on_common_read(struct PSChannel * channel,
     SpiceMiniDataHeader * header, int * dataAvailable);
 
-static PS_STATUS spice_on_main_channel_read(int * dataAvailable);
+static PS_STATUS purespice_on_main_channel_read(int * dataAvailable);
 
-static PS_STATUS spice_on_inputs_channel_read(int * dataAvailable);
+static PS_STATUS purespice_on_inputs_channel_read(int * dataAvailable);
 
-static PS_STATUS spice_on_playback_channel_read(int * dataAvailable);
+static PS_STATUS purespice_on_playback_channel_read(int * dataAvailable);
 
 // globals
 struct PS spice =
 {
   .scMain    .channelType = SPICE_CHANNEL_MAIN,
-  .scMain    .read        = spice_on_main_channel_read,
+  .scMain    .read        = purespice_on_main_channel_read,
   .scInputs  .channelType = SPICE_CHANNEL_INPUTS,
-  .scInputs  .read        = spice_on_inputs_channel_read,
+  .scInputs  .read        = purespice_on_inputs_channel_read,
   .scPlayback.channelType = SPICE_CHANNEL_PLAYBACK,
-  .scPlayback.read        = spice_on_playback_channel_read
+  .scPlayback.read        = purespice_on_playback_channel_read
 };
 
 // internal forward decls
-PS_STATUS spice_connect_channel(struct PSChannel * channel);
-void         spice_disconnect_channel(struct PSChannel * channel);
+PS_STATUS purespice_connect_channel(struct PSChannel * channel);
+void         purespice_disconnect_channel(struct PSChannel * channel);
 
-bool spice_process_ack(struct PSChannel * channel);
+bool purespice_process_ack(struct PSChannel * channel);
 
-PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable);
-bool         spice_agent_process_queue(void);
-PS_STATUS spice_agent_connect();
-PS_STATUS spice_agent_send_caps(bool request);
-void         spice_agent_on_clipboard();
+PS_STATUS purespice_agent_process(uint32_t dataSize, int * dataAvailable);
+bool         purespice_agent_process_queue(void);
+PS_STATUS purespice_agent_connect();
+PS_STATUS purespice_agent_send_caps(bool request);
+void         purespice_agent_on_clipboard();
 
 // utility functions
-static uint32_t spice_type_to_agent_type(PSDataType type);
-static PSDataType agent_type_to_spice_type(uint32_t type);
+static uint32_t purespice_type_to_agent_type(PSDataType type);
+static PSDataType agent_type_to_purespice_type(uint32_t type);
 
 // thread safe read/write methods
-bool spice_agent_start_msg(uint32_t type, ssize_t size);
-bool spice_agent_write_msg(const void * buffer, ssize_t size);
+bool purespice_agent_start_msg(uint32_t type, ssize_t size);
+bool purespice_agent_write_msg(const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
-PS_STATUS spice_read_nl(struct PSChannel * channel, void * buffer,
+PS_STATUS purespice_read_nl(struct PSChannel * channel, void * buffer,
     const ssize_t size, int * dataAvailable);
 
-PS_STATUS spice_discard_nl(struct PSChannel * channel, ssize_t size,
+PS_STATUS purespice_discard_nl(struct PSChannel * channel, ssize_t size,
     int * dataAvailable);
 
-ssize_t spice_write_nl(const struct PSChannel * channel,
+ssize_t purespice_write_nl(const struct PSChannel * channel,
     const void * buffer, const ssize_t size);
 
 static uint64_t get_timestamp()
@@ -269,7 +269,7 @@ static uint64_t get_timestamp()
   return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
 }
 
-bool spice_connect(const char * host, const unsigned short port,
+bool purespice_connect(const char * host, const unsigned short port,
     const char * password, bool playback)
 {
   strncpy(spice.password, password, sizeof(spice.password) - 1);
@@ -295,7 +295,7 @@ bool spice_connect(const char * host, const unsigned short port,
     perror("epoll_create1 failed!\n");
 
   spice.channelID = 0;
-  if (spice_connect_channel(&spice.scMain) != PS_STATUS_OK)
+  if (purespice_connect_channel(&spice.scMain) != PS_STATUS_OK)
   {
     close(spice.epollfd);
     return false;
@@ -304,10 +304,10 @@ bool spice_connect(const char * host, const unsigned short port,
   return true;
 }
 
-void spice_disconnect()
+void purespice_disconnect()
 {
-  spice_disconnect_channel(&spice.scInputs);
-  spice_disconnect_channel(&spice.scMain  );
+  purespice_disconnect_channel(&spice.scInputs);
+  purespice_disconnect_channel(&spice.scMain  );
   close(spice.epollfd);
 
   if (spice.motionBuffer)
@@ -328,13 +328,13 @@ void spice_disconnect()
   spice.hasAgent = false;
 }
 
-bool spice_ready()
+bool purespice_ready()
 {
   return spice.scMain.connected &&
          spice.scInputs.connected;
 }
 
-bool spice_process(int timeout)
+bool purespice_process(int timeout)
 {
   #define MAX_EVENTS 4
   static struct epoll_event events[MAX_EVENTS];
@@ -377,7 +377,7 @@ bool spice_process(int timeout)
             return false;
         }
 
-        if (channel->connected && !spice_process_ack(channel))
+        if (channel->connected && !purespice_process_ack(channel))
           return false;
       }
   }
@@ -408,7 +408,7 @@ bool spice_process(int timeout)
   return false;
 }
 
-bool spice_process_ack(struct PSChannel * channel)
+bool purespice_process_ack(struct PSChannel * channel)
 {
   if (channel->ackFrequency == 0)
     return true;
@@ -423,11 +423,11 @@ bool spice_process_ack(struct PSChannel * channel)
   return SPICE_SEND_PACKET(channel, ack);
 }
 
-static PS_STATUS spice_on_common_read(struct PSChannel * channel,
+static PS_STATUS purespice_on_common_read(struct PSChannel * channel,
     SpiceMiniDataHeader * header, int * dataAvailable)
 {
   PS_STATUS status;
-  if ((status = spice_read_nl(channel, header, sizeof(SpiceMiniDataHeader),
+  if ((status = purespice_read_nl(channel, header, sizeof(SpiceMiniDataHeader),
           dataAvailable)) != PS_STATUS_OK)
     return status;
 
@@ -446,7 +446,7 @@ static PS_STATUS spice_on_common_read(struct PSChannel * channel,
     case SPICE_MSG_SET_ACK:
     {
       SpiceMsgSetAck in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -463,12 +463,12 @@ static PS_STATUS spice_on_common_read(struct PSChannel * channel,
     case SPICE_MSG_PING:
     {
       SpiceMsgPing in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
       const int discard = header->size - sizeof(in);
-      if ((status = spice_discard_nl(channel, discard,
+      if ((status = purespice_discard_nl(channel, discard,
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -493,7 +493,7 @@ static PS_STATUS spice_on_common_read(struct PSChannel * channel,
     case SPICE_MSG_NOTIFY:
     {
       SpiceMsgNotify * in = (SpiceMsgNotify *)alloca(header->size);
-      if ((status = spice_read_nl(channel, in, header->size,
+      if ((status = purespice_read_nl(channel, in, header->size,
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -506,14 +506,14 @@ static PS_STATUS spice_on_common_read(struct PSChannel * channel,
   return PS_STATUS_OK;
 }
 
-static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
+static PS_STATUS purespice_on_main_channel_read(int * dataAvailable)
 {
   struct PSChannel *channel = &spice.scMain;
 
   SpiceMiniDataHeader header;
 
   PS_STATUS status;
-  if ((status = spice_on_common_read(channel, &header,
+  if ((status = purespice_on_common_read(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
     return status;
 
@@ -521,36 +521,36 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   {
     if (header.type != SPICE_MSG_MAIN_INIT)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return PS_STATUS_ERROR;
     }
 
     channel->initDone = true;
     SpiceMsgMainInit msg;
-    if ((status = spice_read_nl(channel, &msg, sizeof(msg),
+    if ((status = purespice_read_nl(channel, &msg, sizeof(msg),
             dataAvailable)) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
     spice.sessionID = msg.session_id;
 
     atomic_store(&spice.serverTokens, msg.agent_tokens);
-    if (msg.agent_connected && (status = spice_agent_connect()) != PS_STATUS_OK)
+    if (msg.agent_connected && (status = purespice_agent_connect()) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
     if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT &&
-        !spice_mouse_mode(false))
+        !purespice_mouse_mode(false))
       return PS_STATUS_ERROR;
 
     void * packet = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, 0, 0);
     if (!SPICE_SEND_PACKET(channel, packet))
     {
-      spice_disconnect();
+      purespice_disconnect();
       return PS_STATUS_ERROR;
     }
 
@@ -560,10 +560,10 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
   {
     SpiceMainChannelsList *msg = (SpiceMainChannelsList*)alloca(header.size);
-    if ((status = spice_read_nl(channel, msg, header.size,
+    if ((status = purespice_read_nl(channel, msg, header.size,
             dataAvailable)) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
@@ -574,14 +574,14 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
         case SPICE_CHANNEL_INPUTS:
           if (spice.scInputs.connected)
           {
-            spice_disconnect();
+            purespice_disconnect();
             return PS_STATUS_ERROR;
           }
 
-          if ((status = spice_connect_channel(&spice.scInputs))
+          if ((status = purespice_connect_channel(&spice.scInputs))
               != PS_STATUS_OK)
           {
-            spice_disconnect();
+            purespice_disconnect();
             return status;
           }
 
@@ -595,14 +595,14 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
 
           if (spice.scPlayback.connected)
           {
-            spice_disconnect();
+            purespice_disconnect();
             return PS_STATUS_ERROR;
           }
 
-          if ((status = spice_connect_channel(&spice.scPlayback))
+          if ((status = purespice_connect_channel(&spice.scPlayback))
               != PS_STATUS_OK)
           {
-            spice_disconnect();
+            purespice_disconnect();
             return status;
           }
 
@@ -617,9 +617,9 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
 
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
   {
-    if ((status = spice_agent_connect()) != PS_STATUS_OK)
+    if ((status = purespice_agent_connect()) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
     return PS_STATUS_OK;
@@ -628,17 +628,17 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS)
   {
     uint32_t num_tokens;
-    if ((status = spice_read_nl(channel, &num_tokens, sizeof(num_tokens),
+    if ((status = purespice_read_nl(channel, &num_tokens, sizeof(num_tokens),
             dataAvailable)) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
     atomic_store(&spice.serverTokens, num_tokens);
-    if ((status = spice_agent_connect()) != PS_STATUS_OK)
+    if ((status = purespice_agent_connect()) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
     return PS_STATUS_OK;
@@ -647,10 +647,10 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   if (header.type == SPICE_MSG_MAIN_AGENT_DISCONNECTED)
   {
     uint32_t error;
-    if ((status = spice_read_nl(channel, &error, sizeof(error),
+    if ((status = purespice_read_nl(channel, &error, sizeof(error),
             dataAvailable)) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
@@ -670,11 +670,11 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   if (header.type == SPICE_MSG_MAIN_AGENT_DATA)
   {
     if (!spice.hasAgent)
-      return spice_discard_nl(channel, header.size, dataAvailable);
+      return purespice_discard_nl(channel, header.size, dataAvailable);
 
-    if ((status = spice_agent_process(header.size,
+    if ((status = purespice_agent_process(header.size,
             dataAvailable)) != PS_STATUS_OK)
-      spice_disconnect();
+      purespice_disconnect();
 
     return status;
   }
@@ -682,34 +682,34 @@ static PS_STATUS spice_on_main_channel_read(int * dataAvailable)
   if (header.type == SPICE_MSG_MAIN_AGENT_TOKEN)
   {
     uint32_t num_tokens;
-    if ((status = spice_read_nl(channel, &num_tokens, sizeof(num_tokens),
+    if ((status = purespice_read_nl(channel, &num_tokens, sizeof(num_tokens),
             dataAvailable)) != PS_STATUS_OK)
     {
-      spice_disconnect();
+      purespice_disconnect();
       return status;
     }
 
     atomic_fetch_add(&spice.serverTokens, num_tokens);
-    if (!spice_agent_process_queue())
+    if (!purespice_agent_process_queue())
     {
-      spice_disconnect();
+      purespice_disconnect();
       return PS_STATUS_ERROR;
     }
 
     return PS_STATUS_OK;
   }
 
-  return spice_discard_nl(channel, header.size, dataAvailable);
+  return purespice_discard_nl(channel, header.size, dataAvailable);
 }
 
-static PS_STATUS spice_on_inputs_channel_read(int * dataAvailable)
+static PS_STATUS purespice_on_inputs_channel_read(int * dataAvailable)
 {
   struct PSChannel *channel = &spice.scInputs;
 
   SpiceMiniDataHeader header;
 
   PS_STATUS status;
-  if ((status = spice_on_common_read(channel, &header,
+  if ((status = purespice_on_common_read(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
     return status;
 
@@ -723,7 +723,7 @@ static PS_STATUS spice_on_inputs_channel_read(int * dataAvailable)
       channel->initDone = true;
 
       SpiceMsgInputsInit in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -733,7 +733,7 @@ static PS_STATUS spice_on_inputs_channel_read(int * dataAvailable)
     case SPICE_MSG_INPUTS_KEY_MODIFIERS:
     {
       SpiceMsgInputsInit in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -750,17 +750,17 @@ static PS_STATUS spice_on_inputs_channel_read(int * dataAvailable)
     }
   }
 
-  return spice_discard_nl(channel, header.size, dataAvailable);
+  return purespice_discard_nl(channel, header.size, dataAvailable);
 }
 
-static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
+static PS_STATUS purespice_on_playback_channel_read(int * dataAvailable)
 {
   struct PSChannel *channel = &spice.scPlayback;
 
   SpiceMiniDataHeader header;
 
   PS_STATUS status;
-  if ((status = spice_on_common_read(channel, &header,
+  if ((status = purespice_on_common_read(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
     return status;
 
@@ -769,7 +769,7 @@ static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
     case SPICE_MSG_PLAYBACK_START:
     {
       SpiceMsgPlaybackStart in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -788,7 +788,7 @@ static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
     {
       SpiceMsgPlaybackPacket * in =
         (SpiceMsgPlaybackPacket *)alloca(header.size);
-      if ((status = spice_read_nl(channel, in, header.size,
+      if ((status = purespice_read_nl(channel, in, header.size,
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -807,7 +807,7 @@ static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
     {
       SpiceMsgAudioVolume * in =
         (SpiceMsgAudioVolume *)alloca(header.size);
-      if ((status = spice_read_nl(channel, in, header.size,
+      if ((status = purespice_read_nl(channel, in, header.size,
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -820,7 +820,7 @@ static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
     case SPICE_MSG_PLAYBACK_MUTE:
     {
       SpiceMsgAudioMute in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      if ((status = purespice_read_nl(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -831,10 +831,10 @@ static PS_STATUS spice_on_playback_channel_read(int * dataAvailable)
     }
   }
 
-  return spice_discard_nl(channel, header.size, dataAvailable);
+  return purespice_discard_nl(channel, header.size, dataAvailable);
 }
 
-PS_STATUS spice_connect_channel(struct PSChannel * channel)
+PS_STATUS purespice_connect_channel(struct PSChannel * channel)
 {
   PS_STATUS status;
 
@@ -922,92 +922,92 @@ PS_STATUS spice_connect_channel(struct PSChannel * channel)
   if (channel == &spice.scPlayback)
     PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
 
-  if (spice_write_nl(channel, &p, sizeof(p)) != sizeof(p))
+  if (purespice_write_nl(channel, &p, sizeof(p)) != sizeof(p))
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
-  if ((status = spice_read_nl(channel, &p.header, sizeof(p.header),
+  if ((status = purespice_read_nl(channel, &p.header, sizeof(p.header),
           NULL)) != PS_STATUS_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return status;
   }
 
   if (p.header.magic         != SPICE_MAGIC ||
       p.header.major_version != SPICE_VERSION_MAJOR)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
   if (p.header.size < sizeof(SpiceLinkReply))
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
   SpiceLinkReply reply;
-  if ((status = spice_read_nl(channel, &reply, sizeof(reply),
+  if ((status = purespice_read_nl(channel, &reply, sizeof(reply),
           NULL)) != PS_STATUS_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return status;
   }
 
   if (reply.error != SPICE_LINK_ERR_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
   uint32_t capsCommon [reply.num_common_caps ];
   uint32_t capsChannel[reply.num_channel_caps];
-  if ((status = spice_read_nl(channel,
+  if ((status = purespice_read_nl(channel,
           &capsCommon , sizeof(capsCommon ), NULL)) != PS_STATUS_OK ||
-      (status = spice_read_nl(channel,
+      (status = purespice_read_nl(channel,
           &capsChannel, sizeof(capsChannel), NULL)) != PS_STATUS_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return status;
   }
 
   SpiceLinkAuthMechanism auth;
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
-  if (spice_write_nl(channel, &auth, sizeof(auth)) != sizeof(auth))
+  if (purespice_write_nl(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
-  struct spice_password pass;
-  if (!spice_rsa_encrypt_password(reply.pub_key, spice.password, &pass))
+  PSPassword pass;
+  if (!purespice_rsa_encrypt_password(reply.pub_key, spice.password, &pass))
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
-  if (spice_write_nl(channel, pass.data, pass.size) != pass.size)
+  if (purespice_write_nl(channel, pass.data, pass.size) != pass.size)
   {
-    spice_rsa_free_password(&pass);
-    spice_disconnect_channel(channel);
+    purespice_rsa_free_password(&pass);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
-  spice_rsa_free_password(&pass);
+  purespice_rsa_free_password(&pass);
 
   uint32_t linkResult;
-  if ((status = spice_read_nl(channel, &linkResult, sizeof(linkResult),
+  if ((status = purespice_read_nl(channel, &linkResult, sizeof(linkResult),
           NULL)) != PS_STATUS_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
-    spice_disconnect_channel(channel);
+    purespice_disconnect_channel(channel);
     return PS_STATUS_ERROR;
   }
 
@@ -1022,7 +1022,7 @@ PS_STATUS spice_connect_channel(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-void spice_disconnect_channel(struct PSChannel * channel)
+void purespice_disconnect_channel(struct PSChannel * channel)
 {
   if (!channel->connected)
     return;
@@ -1057,7 +1057,7 @@ void spice_disconnect_channel(struct PSChannel * channel)
   shutdown(channel->socket, SHUT_WR);
 }
 
-PS_STATUS spice_agent_connect()
+PS_STATUS purespice_agent_connect()
 {
   if (!spice.agentQueue)
     spice.agentQueue = queue_new();
@@ -1074,7 +1074,7 @@ PS_STATUS spice_agent_connect()
     return PS_STATUS_ERROR;
 
   spice.hasAgent = true;
-  PS_STATUS ret = spice_agent_send_caps(true);
+  PS_STATUS ret = purespice_agent_send_caps(true);
   if (ret != PS_STATUS_OK)
   {
     spice.hasAgent = false;
@@ -1084,13 +1084,13 @@ PS_STATUS spice_agent_connect()
   return PS_STATUS_OK;
 }
 
-PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
+PS_STATUS purespice_agent_process(uint32_t dataSize, int * dataAvailable)
 {
   PS_STATUS status;
   if (spice.cbRemain)
   {
     const uint32_t r = spice.cbRemain > dataSize ? dataSize : spice.cbRemain;
-    if ((status = spice_read_nl(&spice.scMain, spice.cbBuffer + spice.cbSize, r,
+    if ((status = purespice_read_nl(&spice.scMain, spice.cbBuffer + spice.cbSize, r,
             dataAvailable)) != PS_STATUS_OK)
     {
       free(spice.cbBuffer);
@@ -1104,7 +1104,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
     spice.cbSize   += r;
 
     if (spice.cbRemain == 0)
-      spice_agent_on_clipboard();
+      purespice_agent_on_clipboard();
 
     return PS_STATUS_OK;
   }
@@ -1119,7 +1119,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
   };
   #pragma pack(pop)
 
-  if ((status = spice_read_nl(&spice.scMain, &msg, sizeof(msg),
+  if ((status = purespice_read_nl(&spice.scMain, &msg, sizeof(msg),
           dataAvailable)) != PS_STATUS_OK)
     return status;
 
@@ -1140,7 +1140,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
       VDAgentAnnounceCapabilities *caps =
         (VDAgentAnnounceCapabilities *)alloca(msg.size);
 
-      if ((status = spice_read_nl(&spice.scMain, caps, msg.size,
+      if ((status = purespice_read_nl(&spice.scMain, caps, msg.size,
               dataAvailable)) != PS_STATUS_OK)
         return status;
 
@@ -1156,7 +1156,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
             VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
       if (caps->request)
-        return spice_agent_send_caps(false);
+        return purespice_agent_send_caps(false);
 
       return PS_STATUS_OK;
     }
@@ -1170,7 +1170,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
       if (spice.cbSelection)
       {
         struct Selection selection;
-        if ((status = spice_read_nl(&spice.scMain, &selection, sizeof(selection),
+        if ((status = purespice_read_nl(&spice.scMain, &selection, sizeof(selection),
                 dataAvailable)) != PS_STATUS_OK)
           return status;
         remaining -= sizeof(selection);
@@ -1189,7 +1189,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
           msg.type == VD_AGENT_CLIPBOARD_REQUEST)
       {
         uint32_t type;
-        if ((status = spice_read_nl(&spice.scMain, &type, sizeof(type),
+        if ((status = purespice_read_nl(&spice.scMain, &type, sizeof(type),
                 dataAvailable)) != PS_STATUS_OK)
           return status;
         remaining -= sizeof(type);
@@ -1205,7 +1205,7 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
           spice.cbBuffer   = (uint8_t *)malloc(remaining);
           const uint32_t r = remaining > dataSize ? dataSize : remaining;
 
-          if ((status = spice_read_nl(&spice.scMain, spice.cbBuffer, r,
+          if ((status = purespice_read_nl(&spice.scMain, spice.cbBuffer, r,
                   dataAvailable)) != PS_STATUS_OK)
           {
             free(spice.cbBuffer);
@@ -1219,14 +1219,14 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
           spice.cbSize   += r;
 
           if (spice.cbRemain == 0)
-            spice_agent_on_clipboard();
+            purespice_agent_on_clipboard();
 
           return PS_STATUS_OK;
         }
         else
         {
           if (spice.cbRequestFn)
-            spice.cbRequestFn(agent_type_to_spice_type(type));
+            spice.cbRequestFn(agent_type_to_purespice_type(type));
           return PS_STATUS_OK;
         }
       }
@@ -1241,14 +1241,14 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
           return PS_STATUS_ERROR;
 
         uint32_t *types = alloca(remaining);
-        if ((status = spice_read_nl(&spice.scMain, types, remaining,
+        if ((status = purespice_read_nl(&spice.scMain, types, remaining,
                 dataAvailable)) != PS_STATUS_OK)
           return status;
 
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
 
-        spice.cbType          = agent_type_to_spice_type(types[0]);
+        spice.cbType          = agent_type_to_purespice_type(types[0]);
         spice.cbAgentGrabbed  = true;
         spice.cbClientGrabbed = false;
         if (spice.cbSelection)
@@ -1266,11 +1266,11 @@ PS_STATUS spice_agent_process(uint32_t dataSize, int * dataAvailable)
     }
   }
 
-  return spice_discard_nl(&spice.scMain, msg.size, dataAvailable);
+  return purespice_discard_nl(&spice.scMain, msg.size, dataAvailable);
 }
 
 
-void spice_agent_on_clipboard()
+void purespice_agent_on_clipboard()
 {
   if (spice.cbDataFn)
     spice.cbDataFn(spice.cbType, spice.cbBuffer, spice.cbSize);
@@ -1281,7 +1281,7 @@ void spice_agent_on_clipboard()
   spice.cbRemain = 0;
 }
 
-PS_STATUS spice_agent_send_caps(bool request)
+PS_STATUS purespice_agent_send_caps(bool request)
 {
   if (!spice.hasAgent)
     return PS_STATUS_ERROR;
@@ -1296,14 +1296,14 @@ PS_STATUS spice_agent_send_caps(bool request)
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
   VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
-  if (!spice_agent_start_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, capsSize) ||
-      !spice_agent_write_msg(caps, capsSize))
+  if (!purespice_agent_start_msg(VD_AGENT_ANNOUNCE_CAPABILITIES, capsSize) ||
+      !purespice_agent_write_msg(caps, capsSize))
     return PS_STATUS_ERROR;
 
   return PS_STATUS_OK;
 }
 
-bool spice_take_server_token(void)
+bool purespice_take_server_token(void)
 {
   uint32_t tokens;
   do
@@ -1320,10 +1320,10 @@ bool spice_take_server_token(void)
   return true;
 }
 
-bool spice_agent_process_queue(void)
+bool purespice_agent_process_queue(void)
 {
   SPICE_LOCK(spice.scMain.lock);
-  while (queue_peek(spice.agentQueue, NULL) && spice_take_server_token())
+  while (queue_peek(spice.agentQueue, NULL) && purespice_take_server_token())
   {
     void * msg;
     queue_shift(spice.agentQueue, &msg);
@@ -1339,7 +1339,7 @@ bool spice_agent_process_queue(void)
   return true;
 }
 
-bool spice_agent_start_msg(uint32_t type, ssize_t size)
+bool purespice_agent_start_msg(uint32_t type, ssize_t size)
 {
   VDAgentMessage * msg =
     SPICE_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
@@ -1351,10 +1351,10 @@ bool spice_agent_start_msg(uint32_t type, ssize_t size)
   spice.agentMsg = size;
   queue_push(spice.agentQueue, msg);
 
-  return spice_agent_process_queue();
+  return purespice_agent_process_queue();
 }
 
-bool spice_agent_write_msg(const void * buffer_, ssize_t size)
+bool purespice_agent_write_msg(const void * buffer_, ssize_t size)
 {
   assert(size <= spice.agentMsg);
 
@@ -1373,10 +1373,10 @@ bool spice_agent_write_msg(const void * buffer_, ssize_t size)
     spice.agentMsg -= toWrite;
   }
 
-  return spice_agent_process_queue();
+  return purespice_agent_process_queue();
 }
 
-ssize_t spice_write_nl(const struct PSChannel * channel,
+ssize_t purespice_write_nl(const struct PSChannel * channel,
     const void * buffer, const ssize_t size)
 {
   if (!channel->connected)
@@ -1388,7 +1388,7 @@ ssize_t spice_write_nl(const struct PSChannel * channel,
   return send(channel->socket, buffer, size, 0);
 }
 
-PS_STATUS spice_read_nl(struct PSChannel * channel, void * buffer,
+PS_STATUS purespice_read_nl(struct PSChannel * channel, void * buffer,
     const ssize_t size, int * dataAvailable)
 {
   if (!channel->connected)
@@ -1420,7 +1420,7 @@ PS_STATUS spice_read_nl(struct PSChannel * channel, void * buffer,
   return PS_STATUS_OK;
 }
 
-PS_STATUS spice_discard_nl(struct PSChannel * channel,
+PS_STATUS purespice_discard_nl(struct PSChannel * channel,
     ssize_t size, int * dataAvailable)
 {
   uint8_t c[1024];
@@ -1446,7 +1446,7 @@ PS_STATUS spice_discard_nl(struct PSChannel * channel,
   return PS_STATUS_OK;
 }
 
-bool spice_key_down(uint32_t code)
+bool purespice_key_down(uint32_t code)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1461,7 +1461,7 @@ bool spice_key_down(uint32_t code)
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
-bool spice_key_up(uint32_t code)
+bool purespice_key_up(uint32_t code)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1478,7 +1478,7 @@ bool spice_key_up(uint32_t code)
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
-bool spice_key_modifiers(uint32_t modifiers)
+bool purespice_key_modifiers(uint32_t modifiers)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1490,7 +1490,7 @@ bool spice_key_modifiers(uint32_t modifiers)
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
-bool spice_mouse_mode(bool server)
+bool purespice_mouse_mode(bool server)
 {
   if (!spice.scMain.connected)
     return false;
@@ -1503,7 +1503,7 @@ bool spice_mouse_mode(bool server)
   return SPICE_SEND_PACKET(&spice.scMain, msg);
 }
 
-bool spice_mouse_position(uint32_t x, uint32_t y)
+bool purespice_mouse_position(uint32_t x, uint32_t y)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1525,7 +1525,7 @@ bool spice_mouse_position(uint32_t x, uint32_t y)
   return true;
 }
 
-bool spice_mouse_motion(int32_t x, int32_t y)
+bool purespice_mouse_motion(int32_t x, int32_t y)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1598,7 +1598,7 @@ bool spice_mouse_motion(int32_t x, int32_t y)
   return wrote == bufferSize;
 }
 
-bool spice_mouse_press(uint32_t button)
+bool purespice_mouse_press(uint32_t button)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1628,7 +1628,7 @@ bool spice_mouse_press(uint32_t button)
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
-bool spice_mouse_release(uint32_t button)
+bool purespice_mouse_release(uint32_t button)
 {
   if (!spice.scInputs.connected)
     return false;
@@ -1658,7 +1658,7 @@ bool spice_mouse_release(uint32_t button)
   return SPICE_SEND_PACKET(&spice.scInputs, msg);
 }
 
-static uint32_t spice_type_to_agent_type(PSDataType type)
+static uint32_t purespice_type_to_agent_type(PSDataType type)
 {
   switch(type)
   {
@@ -1672,7 +1672,7 @@ static uint32_t spice_type_to_agent_type(PSDataType type)
   }
 }
 
-static PSDataType agent_type_to_spice_type(uint32_t type)
+static PSDataType agent_type_to_purespice_type(uint32_t type)
 {
   switch(type)
   {
@@ -1686,7 +1686,7 @@ static PSDataType agent_type_to_spice_type(uint32_t type)
   }
 }
 
-bool spice_clipboard_request(PSDataType type)
+bool purespice_clipboard_request(PSDataType type)
 {
   if (!spice.hasAgent)
     return false;
@@ -1699,15 +1699,15 @@ bool spice_clipboard_request(PSDataType type)
   if (type != spice.cbType)
     return false;
 
-  req.type = spice_type_to_agent_type(type);
-  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_REQUEST, sizeof(req)) ||
-      !spice_agent_write_msg(&req, sizeof(req)))
+  req.type = purespice_type_to_agent_type(type);
+  if (!purespice_agent_start_msg(VD_AGENT_CLIPBOARD_REQUEST, sizeof(req)) ||
+      !purespice_agent_write_msg(&req, sizeof(req)))
     return false;
 
   return true;
 }
 
-bool spice_set_clipboard_cb(
+bool purespice_set_clipboard_cb(
     PSClipboardNotice  cbNoticeFn,
     PSClipboardData    cbDataFn,
     PSClipboardRelease cbReleaseFn,
@@ -1724,7 +1724,7 @@ bool spice_set_clipboard_cb(
   return true;
 }
 
-bool spice_clipboard_grab(PSDataType types[], int count)
+bool purespice_clipboard_grab(PSDataType types[], int count)
 {
   if (!spice.hasAgent)
     return false;
@@ -1746,10 +1746,10 @@ bool spice_clipboard_grab(PSDataType types[], int count)
     msg->selection = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
     msg->reserved  = 0;
     for(int i = 0; i < count; ++i)
-      msg->types[i] = spice_type_to_agent_type(types[i]);
+      msg->types[i] = purespice_type_to_agent_type(types[i]);
 
-    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, size) ||
-        !spice_agent_write_msg(msg, size))
+    if (!purespice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, size) ||
+        !purespice_agent_write_msg(msg, size))
       return false;
 
     spice.cbClientGrabbed = true;
@@ -1758,17 +1758,17 @@ bool spice_clipboard_grab(PSDataType types[], int count)
 
   uint32_t msg[count];
   for(int i = 0; i < count; ++i)
-    msg[i] = spice_type_to_agent_type(types[i]);
+    msg[i] = purespice_type_to_agent_type(types[i]);
 
-  if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(msg)) ||
-      !spice_agent_write_msg(&msg, sizeof(msg)))
+  if (!purespice_agent_start_msg(VD_AGENT_CLIPBOARD_GRAB, sizeof(msg)) ||
+      !purespice_agent_write_msg(&msg, sizeof(msg)))
     return false;
 
   spice.cbClientGrabbed = true;
   return true;
 }
 
-bool spice_clipboard_release()
+bool purespice_clipboard_release()
 {
   if (!spice.hasAgent)
     return false;
@@ -1780,22 +1780,22 @@ bool spice_clipboard_release()
   if (spice.cbSelection)
   {
     uint8_t req[4] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
-    if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, sizeof(req)) ||
-        !spice_agent_write_msg(req, sizeof(req)))
+    if (!purespice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, sizeof(req)) ||
+        !purespice_agent_write_msg(req, sizeof(req)))
       return false;
 
     spice.cbClientGrabbed = false;
     return true;
   }
 
-   if (!spice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, 0))
+   if (!purespice_agent_start_msg(VD_AGENT_CLIPBOARD_RELEASE, 0))
      return false;
 
    spice.cbClientGrabbed = false;
    return true;
 }
 
-bool spice_clipboard_data_start(PSDataType type, size_t size)
+bool purespice_clipboard_data_start(PSDataType type, size_t size)
 {
   if (!spice.hasAgent)
     return false;
@@ -1808,27 +1808,27 @@ bool spice_clipboard_data_start(PSDataType type, size_t size)
     bufSize                = 8;
     buffer[0]              = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
     buffer[1]              = buffer[2] = buffer[3] = 0;
-    ((uint32_t*)buffer)[1] = spice_type_to_agent_type(type);
+    ((uint32_t*)buffer)[1] = purespice_type_to_agent_type(type);
   }
   else
   {
     bufSize                = 4;
-    ((uint32_t*)buffer)[0] = spice_type_to_agent_type(type);
+    ((uint32_t*)buffer)[0] = purespice_type_to_agent_type(type);
   }
 
-  return spice_agent_start_msg(VD_AGENT_CLIPBOARD, bufSize + size) &&
-    spice_agent_write_msg(buffer, bufSize);
+  return purespice_agent_start_msg(VD_AGENT_CLIPBOARD, bufSize + size) &&
+    purespice_agent_write_msg(buffer, bufSize);
 }
 
-bool spice_clipboard_data(PSDataType type, uint8_t * data, size_t size)
+bool purespice_clipboard_data(PSDataType type, uint8_t * data, size_t size)
 {
   if (!spice.hasAgent)
     return false;
 
-  return spice_agent_write_msg(data, size);
+  return purespice_agent_write_msg(data, size);
 }
 
-bool spice_set_audio_cb(
+bool purespice_set_audio_cb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time),
   void (*volume)(int channels, const uint16_t volume[]),

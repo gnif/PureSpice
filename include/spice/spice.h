@@ -53,36 +53,36 @@ typedef void (*PSClipboardRequest)(const PSDataType type);
 extern "C" {
 #endif
 
-bool spice_connect(const char * host, const unsigned short port,
+bool purespice_connect(const char * host, const unsigned short port,
     const char * password, bool playback);
-void spice_disconnect();
-bool spice_process(int timeout);
-bool spice_ready();
+void purespice_disconnect();
+bool purespice_process(int timeout);
+bool purespice_ready();
 
-bool spice_key_down      (uint32_t code);
-bool spice_key_up        (uint32_t code);
-bool spice_key_modifiers (uint32_t modifiers);
-bool spice_mouse_mode    (bool     server);
-bool spice_mouse_position(uint32_t x, uint32_t y);
-bool spice_mouse_motion  ( int32_t x,  int32_t y);
-bool spice_mouse_press   (uint32_t button);
-bool spice_mouse_release (uint32_t button);
+bool purespice_key_down      (uint32_t code);
+bool purespice_key_up        (uint32_t code);
+bool purespice_key_modifiers (uint32_t modifiers);
+bool purespice_mouse_mode    (bool     server);
+bool purespice_mouse_position(uint32_t x, uint32_t y);
+bool purespice_mouse_motion  ( int32_t x,  int32_t y);
+bool purespice_mouse_press   (uint32_t button);
+bool purespice_mouse_release (uint32_t button);
 
-bool spice_clipboard_request(PSDataType type);
-bool spice_clipboard_grab(PSDataType types[], int count);
-bool spice_clipboard_release();
+bool purespice_clipboard_request(PSDataType type);
+bool purespice_clipboard_grab(PSDataType types[], int count);
+bool purespice_clipboard_release();
 
-bool spice_clipboard_data_start(PSDataType type, size_t size);
-bool spice_clipboard_data(PSDataType type, uint8_t * data, size_t size);
+bool purespice_clipboard_data_start(PSDataType type, size_t size);
+bool purespice_clipboard_data(PSDataType type, uint8_t * data, size_t size);
 
 /* events */
-bool spice_set_clipboard_cb(
+bool purespice_set_clipboard_cb(
     PSClipboardNotice  cbNoticeFn,
     PSClipboardData    cbDataFn,
     PSClipboardRelease cbReleaseFn,
     PSClipboardRequest cbRequestFn);
 
-bool spice_set_audio_cb(
+bool purespice_set_audio_cb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time),
   void (*volume)(int channels, const uint16_t volume[]),

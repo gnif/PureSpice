@@ -64,7 +64,7 @@ int main(int argc, char * argv[])
 
   printf("attempting to connect to %s:%d...", host, port);
   fflush(stdout);
-  if (!spice_connect(host, port, "", true))
+  if (!purespice_connect(host, port, "", true))
   {
     printf("spice connect failed\n");
     retval = -1;
@@ -74,8 +74,8 @@ int main(int argc, char * argv[])
 
   printf("waiting for comms setup...");
   fflush(stdout);
-  while(!spice_ready())
-    if (!spice_process(1))
+  while(!purespice_ready())
+    if (!purespice_process(1))
     {
       printf("fail\n");
       retval = -1;
@@ -113,7 +113,7 @@ int main(int argc, char * argv[])
     switch(event.type)
     {
       case ADL_EVENT_NONE:
-        spice_process(1);
+        purespice_process(1);
         continue;
 
       case ADL_EVENT_CLOSE:
@@ -133,7 +133,7 @@ int main(int argc, char * argv[])
         break;
 
       case ADL_EVENT_MOUSE_MOVE:
-        spice_mouse_motion(event.u.mouse.relX, event.u.mouse.relY);
+        purespice_mouse_motion(event.u.mouse.relX, event.u.mouse.relY);
         break;
 
       default:
@@ -144,8 +144,8 @@ int main(int argc, char * argv[])
 exit:
   printf("shutdown...");
   fflush(stdout);
-  spice_disconnect();
-  while(spice_process(1)) {}
+  purespice_disconnect();
+  while(purespice_process(1)) {}
   printf("done.\n");
 
 err_shutdown:
