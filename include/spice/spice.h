@@ -23,7 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum SpiceDataType
+typedef enum PSDataType
 {
   SPICE_DATA_TEXT,
   SPICE_DATA_PNG,
@@ -33,7 +33,7 @@ typedef enum SpiceDataType
 
   SPICE_DATA_NONE
 }
-SpiceDataType;
+PSDataType;
 
 typedef enum PSAudioFormat
 {
@@ -42,11 +42,11 @@ typedef enum PSAudioFormat
 }
 PSAudioFormat;
 
-typedef void (*SpiceClipboardNotice )(const SpiceDataType type);
-typedef void (*SpiceClipboardData   )(const SpiceDataType type,
+typedef void (*PSClipboardNotice )(const PSDataType type);
+typedef void (*PSClipboardData   )(const PSDataType type,
     uint8_t * buffer, uint32_t size);
-typedef void (*SpiceClipboardRelease)();
-typedef void (*SpiceClipboardRequest)(const SpiceDataType type);
+typedef void (*PSClipboardRelease)();
+typedef void (*PSClipboardRequest)(const PSDataType type);
 
 
 #ifdef __cplusplus
@@ -68,19 +68,19 @@ bool spice_mouse_motion  ( int32_t x,  int32_t y);
 bool spice_mouse_press   (uint32_t button);
 bool spice_mouse_release (uint32_t button);
 
-bool spice_clipboard_request(SpiceDataType type);
-bool spice_clipboard_grab(SpiceDataType types[], int count);
+bool spice_clipboard_request(PSDataType type);
+bool spice_clipboard_grab(PSDataType types[], int count);
 bool spice_clipboard_release();
 
-bool spice_clipboard_data_start(SpiceDataType type, size_t size);
-bool spice_clipboard_data(SpiceDataType type, uint8_t * data, size_t size);
+bool spice_clipboard_data_start(PSDataType type, size_t size);
+bool spice_clipboard_data(PSDataType type, uint8_t * data, size_t size);
 
 /* events */
 bool spice_set_clipboard_cb(
-    SpiceClipboardNotice  cbNoticeFn,
-    SpiceClipboardData    cbDataFn,
-    SpiceClipboardRelease cbReleaseFn,
-    SpiceClipboardRequest cbRequestFn);
+    PSClipboardNotice  cbNoticeFn,
+    PSClipboardData    cbDataFn,
+    PSClipboardRelease cbReleaseFn,
+    PSClipboardRequest cbRequestFn);
 
 bool spice_set_audio_cb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
