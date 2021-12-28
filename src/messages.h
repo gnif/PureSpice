@@ -17,6 +17,9 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#ifndef _H_I_MESSAGES_
+#define _H_I_MESSAGES_
+
 #include <stdint.h>
 #include <spice/enums.h>
 
@@ -202,3 +205,5 @@ SpiceMsgcRecordMode;
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
 
 #pragma pack(pop)
+
+#endif

@@ -15,6 +15,11 @@ add_library(purespice STATIC
 	src/spice.c
 	src/rsa.c
 	src/queue.c
+	src/channel.c
+	src/channel_main.c
+	src/channel_inputs.c
+	src/channel_playback.c
+	src/agent.c
 )
 
 target_link_libraries(purespice
