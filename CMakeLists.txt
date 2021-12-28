@@ -12,7 +12,7 @@ pkg_check_modules(SPICE_PKGCONFIG REQUIRED
 add_definitions(-D USE_NETTLE)
 
 add_library(purespice STATIC
-	src/spice.c
+	src/ps.c
 	src/rsa.c
 	src/queue.c
 	src/channel.c

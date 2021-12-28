@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #ifndef _H_I_PURESPICE_
 #define _H_I_PURESPICE_
 
-#include "spice/spice.h"
+#include "purespice.h"
 
 #include "locking.h"
 
