@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include <stdint.h>
+#include <spice/enums.h>
 
 #pragma pack(push,1)
 
@@ -141,32 +142,50 @@ SpiceMsgcDisconnecting;
 
 typedef struct SpiceMsgPlaybackStart
 {
+  uint32_t      channels;
+  SpiceAudioFmt format:16;
+  uint32_t      frequency;
+  uint32_t      time;
+}
+SpiceMsgPlaybackStart;
+
+typedef struct SpiceMsgRecordStart
+{
   uint32_t channels;
   uint16_t format;
   uint32_t frequency;
-  uint32_t time;
 }
-SpiceMsgPlaybackStart;
+SpiceMsgRecordStart;
 
 typedef struct SpiceMsgPlaybackPacket
 {
   uint32_t time;
   //uint8_t data[];
 }
-SpiceMsgPlaybackPacket;
+SpiceMsgPlaybackPacket,
+SpiceMsgcRecordPacket;
 
 typedef struct SpiceMsgAudioVolume
 {
   uint8_t nchannels;
-//  uint16_t volume[nchannels];
+  //uint16_t volume[nchannels];
 }
 SpiceMsgAudioVolume;
 
-typedef struct SpiceMsgAUdioMute
+typedef struct SpiceMsgAudioMute
 {
   uint8_t mute;
 }
 SpiceMsgAudioMute;
+
+typedef struct SpiceMsgcPlaybackMode
+{
+  uint32_t           time;
+  SpiceAudioDataMode mode:16;
+  //uint8_t data[];
+}
+SpiceMsgPlaybackMode,
+SpiceMsgcRecordMode;
 
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
