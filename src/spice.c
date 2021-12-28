@@ -494,16 +494,12 @@ static SPICE_STATUS spice_on_common_read(struct SpiceChannel * channel,
 
     case SPICE_MSG_NOTIFY:
     {
-      SpiceMsgNotify in;
-      if ((status = spice_read_nl(channel, &in, sizeof(in),
+      SpiceMsgNotify * in = (SpiceMsgNotify *)alloca(header->size);
+      if ((status = spice_read_nl(channel, in, header->size,
               dataAvailable)) != SPICE_STATUS_OK)
         return status;
 
-      char msg[in.message_len + 1];
-      if ((status = spice_read_nl(channel, msg, in.message_len + 1,
-              dataAvailable)) != SPICE_STATUS_OK)
-        return status;
-      *dataAvailable -= in.message_len + 1;
+      //TODO: send this to a logging function/interface
 
       return SPICE_STATUS_HANDLED;
     }
@@ -565,29 +561,17 @@ static SPICE_STATUS spice_on_main_channel_read(int * dataAvailable)
 
   if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
   {
-    SpiceMainChannelsList msg;
-    if ((status = spice_read_nl(channel, &msg, sizeof(msg),
+    SpiceMainChannelsList *msg = (SpiceMainChannelsList*)alloca(header.size);
+    if ((status = spice_read_nl(channel, msg, header.size,
             dataAvailable)) != SPICE_STATUS_OK)
     {
       spice_disconnect();
       return status;
     }
 
-    /* SPICE documentation doesn't state that the array is null terminated but
-     * it seems that it is
-     */
-    SpiceChannelID channels[msg.num_of_channels];
-    if ((status = spice_read_nl(channel, &channels,
-            msg.num_of_channels * sizeof(SpiceChannelID),
-            dataAvailable)) != SPICE_STATUS_OK)
+    for(int i = 0; i < msg->num_of_channels; ++i)
     {
-      spice_disconnect();
-      return status;
-    }
-
-    for(int i = 0; i < msg.num_of_channels; ++i)
-    {
-      switch(channels[i].type)
+      switch(msg->channels[i].type)
       {
         case SPICE_CHANNEL_INPUTS:
           if (spice.scInputs.connected)
@@ -811,7 +795,7 @@ static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable)
         return status;
 
       if (spice.playbackData)
-        spice.playbackData((uint8_t*)(++in), header.size - sizeof(*in));
+        spice.playbackData(in->data, header.size - sizeof(*in));
 
       return SPICE_STATUS_OK;
     }
@@ -830,10 +814,7 @@ static SPICE_STATUS spice_on_playback_channel_read(int * dataAvailable)
         return status;
 
       if (spice.playbackVolume)
-      {
-        uint16_t * volume = (uint16_t *)(in + 1);
-        spice.playbackVolume(in->nchannels, volume);
-      }
+        spice.playbackVolume(in->nchannels, in->volume);
 
       return SPICE_STATUS_OK;
     }
