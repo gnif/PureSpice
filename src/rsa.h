@@ -27,6 +27,6 @@ typedef struct PSPassword
 }
 PSPassword;
 
-bool purespice_rsa_encrypt_password(uint8_t * pub_key, char * password,
+bool purespice_rsaEncryptPassword(uint8_t * pub_key, char * password,
     PSPassword * result);
-void purespice_rsa_free_password(PSPassword * pass);
+void purespice_rsaFreePassword(PSPassword * pass);

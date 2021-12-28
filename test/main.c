@@ -133,7 +133,7 @@ int main(int argc, char * argv[])
         break;
 
       case ADL_EVENT_MOUSE_MOVE:
-        purespice_mouse_motion(event.u.mouse.relX, event.u.mouse.relY);
+        purespice_mouseMotion(event.u.mouse.relX, event.u.mouse.relY);
         break;
 
       default:

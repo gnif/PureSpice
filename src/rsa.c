@@ -127,7 +127,7 @@ static bool oaep_pad(mpz_t m, unsigned int key_size,
 }
 #endif
 
-bool purespice_rsa_encrypt_password(uint8_t * pub_key, char * password,
+bool purespice_rsaEncryptPassword(uint8_t * pub_key, char * password,
     PSPassword * result)
 {
   result->size = 0;
@@ -215,7 +215,7 @@ bool purespice_rsa_encrypt_password(uint8_t * pub_key, char * password,
 #endif
 }
 
-void purespice_rsa_free_password(PSPassword * pass)
+void purespice_rsaFreePassword(PSPassword * pass)
 {
   free(pass->data);
   pass->size = 0;

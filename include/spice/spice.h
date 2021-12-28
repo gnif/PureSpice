@@ -59,30 +59,30 @@ void purespice_disconnect();
 bool purespice_process(int timeout);
 bool purespice_ready();
 
-bool purespice_key_down      (uint32_t code);
-bool purespice_key_up        (uint32_t code);
-bool purespice_key_modifiers (uint32_t modifiers);
-bool purespice_mouse_mode    (bool     server);
-bool purespice_mouse_position(uint32_t x, uint32_t y);
-bool purespice_mouse_motion  ( int32_t x,  int32_t y);
-bool purespice_mouse_press   (uint32_t button);
-bool purespice_mouse_release (uint32_t button);
+bool purespice_keyDown      (uint32_t code);
+bool purespice_keyUp        (uint32_t code);
+bool purespice_keyModifiers (uint32_t modifiers);
+bool purespice_mouseMode    (bool     server);
+bool purespice_mousePosition(uint32_t x, uint32_t y);
+bool purespice_mouseMotion  ( int32_t x,  int32_t y);
+bool purespice_mousePress   (uint32_t button);
+bool purespice_mouseRelease (uint32_t button);
 
-bool purespice_clipboard_request(PSDataType type);
-bool purespice_clipboard_grab(PSDataType types[], int count);
-bool purespice_clipboard_release();
+bool purespice_clipboardRequest(PSDataType type);
+bool purespice_clipboardGrab(PSDataType types[], int count);
+bool purespice_clipboardRelease();
 
-bool purespice_clipboard_data_start(PSDataType type, size_t size);
-bool purespice_clipboard_data(PSDataType type, uint8_t * data, size_t size);
+bool purespice_clipboardDataStart(PSDataType type, size_t size);
+bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size);
 
 /* events */
-bool purespice_set_clipboard_cb(
+bool purespice_setClipboardCb(
     PSClipboardNotice  cbNoticeFn,
     PSClipboardData    cbDataFn,
     PSClipboardRelease cbReleaseFn,
     PSClipboardRequest cbRequestFn);
 
-bool purespice_set_audio_cb(
+bool purespice_setAudioCb(
   void (*start)(int channels, int sampleRate, PSAudioFormat format,
     uint32_t time),
   void (*volume)(int channels, const uint16_t volume[]),
