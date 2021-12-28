@@ -50,8 +50,8 @@ SpiceChannelID;
 
 typedef struct SpiceMsgMainChannelsList
 {
-  uint32_t num_of_channels;
-  //SpiceChannelID channels[num_of_channels]
+  uint32_t       num_of_channels;
+  SpiceChannelID channels[];
 }
 SpiceMainChannelsList;
 
@@ -89,7 +89,7 @@ typedef struct SpiceMsgNotify
   uint32_t visibility;
   uint32_t what;
   uint32_t message_len;
-  //char message[message_len+1]
+  char     message[]; //message_len+1
 }
 SpiceMsgNotify;
 
@@ -160,15 +160,15 @@ SpiceMsgRecordStart;
 typedef struct SpiceMsgPlaybackPacket
 {
   uint32_t time;
-  //uint8_t data[];
+  uint8_t  data[];
 }
 SpiceMsgPlaybackPacket,
 SpiceMsgcRecordPacket;
 
 typedef struct SpiceMsgAudioVolume
 {
-  uint8_t nchannels;
-  //uint16_t volume[nchannels];
+  uint8_t  nchannels;
+  uint16_t volume[];
 }
 SpiceMsgAudioVolume;
 
@@ -182,7 +182,7 @@ typedef struct SpiceMsgcPlaybackMode
 {
   uint32_t           time;
   SpiceAudioDataMode mode:16;
-  //uint8_t data[];
+  uint8_t            data[];
 }
 SpiceMsgPlaybackMode,
 SpiceMsgcRecordMode;
