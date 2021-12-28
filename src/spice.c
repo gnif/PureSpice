@@ -231,33 +231,33 @@ struct PS spice =
 };
 
 // internal forward decls
-PS_STATUS purespice_connectChannel(struct PSChannel * channel);
-void         purespice_disconnectChannel(struct PSChannel * channel);
+static PS_STATUS purespice_connectChannel(struct PSChannel * channel);
+static void         purespice_disconnectChannel(struct PSChannel * channel);
 
-bool purespice_processAck(struct PSChannel * channel);
+static bool purespice_processAck(struct PSChannel * channel);
 
-PS_STATUS purespice_agentProcess(uint32_t dataSize, int * dataAvailable);
-bool         purespice_agentProcessQueue(void);
-PS_STATUS purespice_agentConnect();
-PS_STATUS purespice_agentSendCaps(bool request);
-void         purespice_agentOnClipboard();
+static PS_STATUS purespice_agentProcess(uint32_t dataSize, int * dataAvailable);
+static bool         purespice_agentProcessQueue(void);
+static PS_STATUS purespice_agentConnect();
+static PS_STATUS purespice_agentSendCaps(bool request);
+static void         purespice_agentOnClipboard();
 
 // utility functions
 static uint32_t purespice_typeToAgentType(PSDataType type);
 static PSDataType agent_type_to_purespice_type(uint32_t type);
 
 // thread safe read/write methods
-bool purespice_agentStartMsg(uint32_t type, ssize_t size);
-bool purespice_agentWriteMsg(const void * buffer, ssize_t size);
+static bool purespice_agentStartMsg(uint32_t type, ssize_t size);
+static bool purespice_agentWriteMsg(const void * buffer, ssize_t size);
 
 // non thread safe read/write methods (nl = non-locking)
-PS_STATUS purespice_readNL(struct PSChannel * channel, void * buffer,
+static PS_STATUS purespice_readNL(struct PSChannel * channel, void * buffer,
     const ssize_t size, int * dataAvailable);
 
-PS_STATUS purespice_discardNL(struct PSChannel * channel, ssize_t size,
+static PS_STATUS purespice_discardNL(struct PSChannel * channel, ssize_t size,
     int * dataAvailable);
 
-ssize_t purespice_writeNL(const struct PSChannel * channel,
+static ssize_t purespice_writeNL(const struct PSChannel * channel,
     const void * buffer, const ssize_t size);
 
 static uint64_t get_timestamp()
@@ -408,7 +408,7 @@ bool purespice_process(int timeout)
   return false;
 }
 
-bool purespice_processAck(struct PSChannel * channel)
+static bool purespice_processAck(struct PSChannel * channel)
 {
   if (channel->ackFrequency == 0)
     return true;
@@ -834,7 +834,7 @@ static PS_STATUS purespice_onPlaybackChannelRead(int * dataAvailable)
   return purespice_discardNL(channel, header.size, dataAvailable);
 }
 
-PS_STATUS purespice_connectChannel(struct PSChannel * channel)
+static PS_STATUS purespice_connectChannel(struct PSChannel * channel)
 {
   PS_STATUS status;
 
@@ -1022,7 +1022,7 @@ PS_STATUS purespice_connectChannel(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-void purespice_disconnectChannel(struct PSChannel * channel)
+static void purespice_disconnectChannel(struct PSChannel * channel)
 {
   if (!channel->connected)
     return;
@@ -1057,7 +1057,7 @@ void purespice_disconnectChannel(struct PSChannel * channel)
   shutdown(channel->socket, SHUT_WR);
 }
 
-PS_STATUS purespice_agentConnect()
+static PS_STATUS purespice_agentConnect()
 {
   if (!spice.agentQueue)
     spice.agentQueue = queue_new();
@@ -1084,7 +1084,7 @@ PS_STATUS purespice_agentConnect()
   return PS_STATUS_OK;
 }
 
-PS_STATUS purespice_agentProcess(uint32_t dataSize, int * dataAvailable)
+static PS_STATUS purespice_agentProcess(uint32_t dataSize, int * dataAvailable)
 {
   PS_STATUS status;
   if (spice.cbRemain)
@@ -1270,7 +1270,7 @@ PS_STATUS purespice_agentProcess(uint32_t dataSize, int * dataAvailable)
 }
 
 
-void purespice_agentOnClipboard()
+static void purespice_agentOnClipboard()
 {
   if (spice.cbDataFn)
     spice.cbDataFn(spice.cbType, spice.cbBuffer, spice.cbSize);
@@ -1281,7 +1281,7 @@ void purespice_agentOnClipboard()
   spice.cbRemain = 0;
 }
 
-PS_STATUS purespice_agentSendCaps(bool request)
+static PS_STATUS purespice_agentSendCaps(bool request)
 {
   if (!spice.hasAgent)
     return PS_STATUS_ERROR;
@@ -1303,7 +1303,7 @@ PS_STATUS purespice_agentSendCaps(bool request)
   return PS_STATUS_OK;
 }
 
-bool purespice_takeServerToken(void)
+static bool purespice_takeServerToken(void)
 {
   uint32_t tokens;
   do
@@ -1320,7 +1320,7 @@ bool purespice_takeServerToken(void)
   return true;
 }
 
-bool purespice_agentProcessQueue(void)
+static bool purespice_agentProcessQueue(void)
 {
   SPICE_LOCK(spice.scMain.lock);
   while (queue_peek(spice.agentQueue, NULL) && purespice_takeServerToken())
@@ -1339,7 +1339,7 @@ bool purespice_agentProcessQueue(void)
   return true;
 }
 
-bool purespice_agentStartMsg(uint32_t type, ssize_t size)
+static bool purespice_agentStartMsg(uint32_t type, ssize_t size)
 {
   VDAgentMessage * msg =
     SPICE_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
@@ -1354,7 +1354,7 @@ bool purespice_agentStartMsg(uint32_t type, ssize_t size)
   return purespice_agentProcessQueue();
 }
 
-bool purespice_agentWriteMsg(const void * buffer_, ssize_t size)
+static bool purespice_agentWriteMsg(const void * buffer_, ssize_t size)
 {
   assert(size <= spice.agentMsg);
 
@@ -1376,7 +1376,7 @@ bool purespice_agentWriteMsg(const void * buffer_, ssize_t size)
   return purespice_agentProcessQueue();
 }
 
-ssize_t purespice_writeNL(const struct PSChannel * channel,
+static ssize_t purespice_writeNL(const struct PSChannel * channel,
     const void * buffer, const ssize_t size)
 {
   if (!channel->connected)
@@ -1388,7 +1388,7 @@ ssize_t purespice_writeNL(const struct PSChannel * channel,
   return send(channel->socket, buffer, size, 0);
 }
 
-PS_STATUS purespice_readNL(struct PSChannel * channel, void * buffer,
+static PS_STATUS purespice_readNL(struct PSChannel * channel, void * buffer,
     const ssize_t size, int * dataAvailable)
 {
   if (!channel->connected)
@@ -1420,7 +1420,7 @@ PS_STATUS purespice_readNL(struct PSChannel * channel, void * buffer,
   return PS_STATUS_OK;
 }
 
-PS_STATUS purespice_discardNL(struct PSChannel * channel,
+static PS_STATUS purespice_discardNL(struct PSChannel * channel,
     ssize_t size, int * dataAvailable)
 {
   uint8_t c[1024];
