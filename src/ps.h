@@ -129,7 +129,8 @@ struct PSChannel
 
 struct PS
 {
-  char         password[32];
+  PSConfig config;
+
   short        family;
   union
   {
@@ -166,8 +167,6 @@ struct PS
 
   uint8_t * motionBuffer;
   size_t    motionBufferSize;
-
-  bool playback;
 };
 
 extern struct PS g_ps;

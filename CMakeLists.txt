@@ -13,6 +13,7 @@ add_definitions(-D USE_NETTLE)
 
 add_library(purespice STATIC
 	src/ps.c
+	src/log.c
 	src/rsa.c
 	src/queue.c
 	src/channel.c

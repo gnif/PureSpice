@@ -190,7 +190,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   }
 
   PSPassword pass;
-  if (!purespice_rsaEncryptPassword(reply.pub_key, g_ps.password, &pass))
+  if (!purespice_rsaEncryptPassword(reply.pub_key, g_ps.config.password, &pass))
   {
     channel_disconnect(channel);
     return PS_STATUS_ERROR;

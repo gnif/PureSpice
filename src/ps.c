@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "purespice.h"
 
 #include "ps.h"
+#include "log.h"
 #include "agent.h"
 #include "channel.h"
 #include "channel_main.h"
@@ -51,39 +52,77 @@ struct PS g_ps =
   .scPlayback.read        = channelPlayback_onRead
 };
 
-bool purespice_connect(const char * host, const unsigned short port,
-    const char * password, bool playback)
+bool purespice_connect(const PSConfig * config)
 {
-  strncpy(g_ps.password, password, sizeof(g_ps.password) - 1);
-  memset(&g_ps.addr, 0, sizeof(g_ps.addr));
-  g_ps.playback = playback;
+  memcpy(&g_ps.config, config, sizeof(*config));
+  log_init();
 
-  if (port == 0)
+  g_ps.config.host = strdup(config->host);
+  if (!g_ps.config.host)
   {
+    PS_LOG_ERROR("Failed to malloc");
+    goto err_host;
+  }
+
+  g_ps.config.password = strdup(config->password);
+  if (!g_ps.config.password)
+  {
+    PS_LOG_ERROR("Failed to malloc");
+    goto err_password;
+  }
+
+  memset(&g_ps.addr, 0, sizeof(g_ps.addr));
+
+  if (g_ps.config.port == 0)
+  {
+    PS_LOG_INFO("Connecting to unix socket %s", g_ps.config.host);
+
     g_ps.family = AF_UNIX;
     g_ps.addr.un.sun_family = g_ps.family;
-    strncpy(g_ps.addr.un.sun_path, host, sizeof(g_ps.addr.un.sun_path) - 1);
+    strncpy(g_ps.addr.un.sun_path, g_ps.config.host,
+        sizeof(g_ps.addr.un.sun_path) - 1);
   }
   else
   {
+    PS_LOG_INFO("Connecting to socket %s:%u",
+        g_ps.config.host, g_ps.config.port);
+
     g_ps.family = AF_INET;
-    inet_pton(g_ps.family, host, &g_ps.addr.in.sin_addr);
+    inet_pton(g_ps.family, g_ps.config.host, &g_ps.addr.in.sin_addr);
     g_ps.addr.in.sin_family = g_ps.family;
-    g_ps.addr.in.sin_port   = htons(port);
+    g_ps.addr.in.sin_port   = htons(g_ps.config.port);
   }
 
   g_ps.epollfd = epoll_create1(0);
   if (g_ps.epollfd < 0)
-    perror("epoll_create1 failed!\n");
+  {
+    PS_LOG_ERROR("epoll_create1 failed");
+    goto err_epoll;
+  }
 
   g_ps.channelID = 0;
   if (channel_connect(&g_ps.scMain) != PS_STATUS_OK)
   {
-    close(g_ps.epollfd);
-    return false;
+    PS_LOG_ERROR("channel connect failed");
+    goto err_connect;
   }
 
+  PS_LOG_INFO("Connected");
   return true;
+
+err_connect:
+  close(g_ps.epollfd);
+
+err_epoll:
+  free(g_ps.config.host);
+  g_ps.config.host = NULL;
+
+err_password:
+  free(g_ps.config.password);
+  g_ps.config.host = NULL;
+
+err_host:
+  return false;
 }
 
 void purespice_disconnect()
@@ -98,7 +137,20 @@ void purespice_disconnect()
     g_ps.motionBuffer = NULL;
   }
 
+  if (g_ps.config.host)
+  {
+    free(g_ps.config.host);
+    g_ps.config.host = NULL;
+  }
+
+  if (g_ps.config.password)
+  {
+    free(g_ps.config.password);
+    g_ps.config.password = NULL;
+  }
+
   agent_disconnect();
+  PS_LOG_INFO("Disconnected");
 }
 
 bool purespice_ready()
@@ -117,7 +169,10 @@ bool purespice_process(int timeout)
     return true;
 
   if (nfds < 0)
+  {
+    PS_LOG_ERROR("epoll_err returned %d", nfds);
     return false;
+  }
 
   for(int i = 0; i < nfds; ++i)
   {
@@ -151,7 +206,10 @@ bool purespice_process(int timeout)
         }
 
         if (channel->connected && !channel_ack(channel))
+        {
+          PS_LOG_ERROR("Failed to send message ack");
           return false;
+        }
       }
   }
 
@@ -166,5 +224,6 @@ bool purespice_process(int timeout)
   if (g_ps.scMain.connected)
     close(g_ps.scMain.socket);
 
+  PS_LOG_INFO("Shutdown");
   return false;
 }

@@ -124,7 +124,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
           break;
 
         case SPICE_CHANNEL_PLAYBACK:
-          if (!g_ps.playback)
+          if (!g_ps.config.playback)
             break;
 
           if (g_ps.scPlayback.connected)

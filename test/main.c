@@ -61,10 +61,18 @@ int main(int argc, char * argv[])
     }
   }
 
+  const PSConfig config =
+  {
+    .host     = host,
+    .port     = port,
+    .password = "",
+    .playback = true
+  };
+
 
   printf("attempting to connect to %s:%d...", host, port);
   fflush(stdout);
-  if (!purespice_connect(host, port, "", true))
+  if (!purespice_connect(&config))
   {
     printf("spice connect failed\n");
     retval = -1;

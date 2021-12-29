@@ -42,6 +42,28 @@ typedef enum PSAudioFormat
 }
 PSAudioFormat;
 
+typedef struct PSConfig
+{
+  char   * host;
+  unsigned port;
+  char   * password;
+  bool     playback;
+
+  struct
+  {
+    void (*info)(const char * file, unsigned int line, const char * function,
+        const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+    void (*warn)(const char * file, unsigned int line, const char * function,
+        const char * format, ...) __attribute__((format (printf, 4, 5)));
+
+    void (*error)(const char * file, unsigned int line, const char * function,
+        const char * format, ...) __attribute__((format (printf, 4, 5)));
+  }
+  log;
+}
+PSConfig;
+
 typedef void (*PSClipboardNotice )(const PSDataType type);
 typedef void (*PSClipboardData   )(const PSDataType type,
     uint8_t * buffer, uint32_t size);
@@ -53,8 +75,7 @@ typedef void (*PSClipboardRequest)(const PSDataType type);
 extern "C" {
 #endif
 
-bool purespice_connect(const char * host, const unsigned short port,
-    const char * password, bool playback);
+bool purespice_connect(const struct PSConfig * config);
 void purespice_disconnect();
 bool purespice_process(int timeout);
 bool purespice_ready();
