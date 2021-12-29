@@ -20,25 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "channel_main.h"
 #include "channel.h"
 #include "agent.h"
-
-//#include "spice/spice.h"
-
-//#include "ps.h"
-//#include "channel.h"
-
 #include "messages.h"
-//#include "rsa.h"
-//#include "queue.h"
-
-//#include <unistd.h>
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include <assert.h>
-
-//#include <sys/ioctl.h>
-//#include <sys/epoll.h>
-
-//#include <spice/vd_agent.h>
 
 PS_STATUS channelMain_onRead(int * dataAvailable)
 {
