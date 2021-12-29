@@ -135,7 +135,7 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
   result->data = NULL;
 
 #if defined(USE_OPENSSL)
-  PS_LOG_INFO("Using OpenSSL");
+  PS_LOG_INFO_ONCE("Using OpenSSL");
 
   BIO *bioKey = BIO_new(BIO_s_mem());
   if (!bioKey)
@@ -175,7 +175,7 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
 #endif
 
 #if defined(USE_NETTLE)
-  PS_LOG_INFO("Using Nettle");
+  PS_LOG_INFO_ONCE("Using Nettle");
 
   struct asn1_der_iterator der;
   struct asn1_der_iterator j;
