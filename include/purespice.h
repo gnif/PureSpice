@@ -44,10 +44,10 @@ PSAudioFormat;
 
 typedef struct PSConfig
 {
-  char   * host;
-  unsigned port;
-  char   * password;
-  bool     playback;
+  const char * host;
+  unsigned     port;
+  const char * password;
+  bool         playback;
 
   struct
   {

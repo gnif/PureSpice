@@ -57,14 +57,14 @@ bool purespice_connect(const PSConfig * config)
   memcpy(&g_ps.config, config, sizeof(*config));
   log_init();
 
-  g_ps.config.host = strdup(config->host);
+  g_ps.config.host = (const char *)strdup(config->host);
   if (!g_ps.config.host)
   {
     PS_LOG_ERROR("Failed to malloc");
     goto err_host;
   }
 
-  g_ps.config.password = strdup(config->password);
+  g_ps.config.password = (const char *)strdup(config->password);
   if (!g_ps.config.password)
   {
     PS_LOG_ERROR("Failed to malloc");
@@ -114,11 +114,11 @@ err_connect:
   close(g_ps.epollfd);
 
 err_epoll:
-  free(g_ps.config.host);
+  free((char *)g_ps.config.host);
   g_ps.config.host = NULL;
 
 err_password:
-  free(g_ps.config.password);
+  free((char *)g_ps.config.password);
   g_ps.config.host = NULL;
 
 err_host:
@@ -139,13 +139,13 @@ void purespice_disconnect()
 
   if (g_ps.config.host)
   {
-    free(g_ps.config.host);
+    free((char *)g_ps.config.host);
     g_ps.config.host = NULL;
   }
 
   if (g_ps.config.password)
   {
-    free(g_ps.config.password);
+    free((char *)g_ps.config.password);
     g_ps.config.password = NULL;
   }
 

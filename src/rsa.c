@@ -127,7 +127,7 @@ static bool oaep_pad(mpz_t m, unsigned int key_size,
 }
 #endif
 
-bool purespice_rsaEncryptPassword(uint8_t * pub_key, char * password,
+bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
     PSPassword * result)
 {
   result->size = 0;
@@ -147,7 +147,7 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, char * password,
 
   if (RSA_public_encrypt(
         strlen(password) + 1,
-        (uint8_t*)password,
+        (const uint8_t*)password,
         (uint8_t*)result->data,
         rsa,
         RSA_PKCS1_OAEP_PADDING
@@ -202,7 +202,7 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, char * password,
 
   mpz_t p;
   mpz_init(p);
-  oaep_pad(p, pub.size, (uint8_t *)password, strlen(password)+1);
+  oaep_pad(p, pub.size, (const uint8_t *)password, strlen(password)+1);
   mpz_powm(p, p, pub.e, pub.n);
 
   result->size = pub.size;
