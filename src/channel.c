@@ -202,7 +202,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   }
 
   PSPassword pass;
-  if (!purespice_rsaEncryptPassword(reply.pub_key, g_ps.config.password, &pass))
+  if (!rsa_encryptPassword(reply.pub_key, g_ps.config.password, &pass))
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("Failed to encrypt the password");
@@ -211,13 +211,13 @@ PS_STATUS channel_connect(struct PSChannel * channel)
 
   if (channel_writeNL(channel, pass.data, pass.size) != pass.size)
   {
-    purespice_rsaFreePassword(&pass);
+    rsa_freePassword(&pass);
     channel_disconnect(channel);
     PS_LOG_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
 
-  purespice_rsaFreePassword(&pass);
+  rsa_freePassword(&pass);
 
   uint32_t linkResult;
   if ((status = channel_readNL(channel, &linkResult, sizeof(linkResult),
