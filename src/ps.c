@@ -71,18 +71,45 @@ bool purespice_connect(const PSConfig * config)
     goto err_password;
   }
 
+  if (g_ps.config.clipboard.enable)
+  {
+    if (!g_ps.config.clipboard.notice)
+    {
+      PS_LOG_ERROR("clipboard->notice is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.clipboard.data)
+    {
+      PS_LOG_ERROR("clipboard->data is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.clipboard.release)
+    {
+      PS_LOG_ERROR("clipboard->release is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.clipboard.request)
+    {
+      PS_LOG_ERROR("clipboard->request is mandatory");
+      goto err_config;
+    }
+  }
+
   if (g_ps.config.playback.enable)
   {
     if (!g_ps.config.playback.start)
     {
       PS_LOG_ERROR("playback->start is mandatory");
-      goto err_password;
+      goto err_config;
     }
 
     if (!g_ps.config.playback.data)
     {
       PS_LOG_ERROR("playback->data is mandatory");
-      goto err_password;
+      goto err_config;
     }
   }
 
@@ -112,7 +139,7 @@ bool purespice_connect(const PSConfig * config)
   if (g_ps.epollfd < 0)
   {
     PS_LOG_ERROR("epoll_create1 failed");
-    goto err_epoll;
+    goto err_config;
   }
 
   g_ps.channelID = 0;
@@ -128,7 +155,7 @@ bool purespice_connect(const PSConfig * config)
 err_connect:
   close(g_ps.epollfd);
 
-err_epoll:
+err_config:
   free((char *)g_ps.config.host);
   g_ps.config.host = NULL;
 

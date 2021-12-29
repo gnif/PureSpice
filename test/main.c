@@ -24,6 +24,28 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <purespice.h>
 
+static void clipboard_notice(const PSDataType type)
+{
+  printf("clipboard_notice(type: %d)\n", type);
+}
+
+static void clipboard_data(const PSDataType type, uint8_t * buffer,
+    uint32_t size)
+{
+  printf("clipboard_data(type: %d, buffer: %p, size: %u)\n",
+      type, buffer, size);
+}
+
+static void clipboard_release(void)
+{
+  printf("clipboard_release\n");
+}
+
+static void clipboard_request(const PSDataType type)
+{
+  printf("clipboard_request\n");
+}
+
 static void playback_start(int channels, int sampleRate, PSAudioFormat format,
         uint32_t time)
 {
@@ -51,7 +73,7 @@ static void playback_stop(void)
 
 static void playback_data(uint8_t * data, size_t size)
 {
-  printf("playback_data(0x%p, %lu)\n", data, size);
+  printf("playback_data(%p, %lu)\n", data, size);
 }
 
 int main(int argc, char * argv[])
@@ -93,9 +115,17 @@ int main(int argc, char * argv[])
 
   const PSConfig config =
   {
-    .host     = host,
-    .port     = port,
-    .password = "",
+    .host      = host,
+    .port      = port,
+    .password  = "",
+    .clipboard =
+    {
+      .enable  = true,
+      .notice  = clipboard_notice,
+      .data    = clipboard_data,
+      .release = clipboard_release,
+      .request = clipboard_request
+    },
     .playback =
     {
       .enable = true,

@@ -53,10 +53,6 @@ struct PSAgent
   uint8_t *          cbBuffer;
   uint32_t           cbRemain;
   uint32_t           cbSize;
-  PSClipboardNotice  cbNoticeFn;
-  PSClipboardData    cbDataFn;
-  PSClipboardRelease cbReleaseFn;
-  PSClipboardRequest cbRequestFn;
 
   ssize_t msgSize;
 };
@@ -245,8 +241,8 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
       if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
       {
         agent.cbAgentGrabbed = false;
-        if (agent.cbReleaseFn)
-          agent.cbReleaseFn();
+        if (g_ps.config.clipboard.enable)
+          g_ps.config.clipboard.release();
         return PS_STATUS_OK;
       }
 
@@ -304,8 +300,8 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
         }
         else
         {
-          if (agent.cbRequestFn)
-            agent.cbRequestFn(agentTypeToPSType(type));
+          if (g_ps.config.clipboard.enable)
+            g_ps.config.clipboard.request(agentTypeToPSType(type));
           return PS_STATUS_OK;
         }
       }
@@ -344,9 +340,8 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
           return PS_STATUS_OK;
         }
 
-        if (agent.cbNoticeFn)
-            agent.cbNoticeFn(agent.cbType);
-
+        if (g_ps.config.clipboard.enable)
+          g_ps.config.clipboard.notice(agent.cbType);
         return PS_STATUS_OK;
       }
     }
@@ -364,8 +359,8 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
 
 static void agent_onClipboard(void)
 {
-  if (agent.cbDataFn)
-    agent.cbDataFn(agent.cbType, agent.cbBuffer, agent.cbSize);
+  if (g_ps.config.clipboard.enable)
+    g_ps.config.clipboard.data(agent.cbType, agent.cbBuffer, agent.cbSize);
 
   free(agent.cbBuffer);
   agent.cbBuffer = NULL;
@@ -468,9 +463,12 @@ static PS_STATUS agent_sendCaps(bool request)
     (VDAgentAnnounceCapabilities *)alloca(capsSize);
   memset(caps, 0, capsSize);
 
-  caps->request = request ? 1 : 0;
-  VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
-  VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
+  if (g_ps.config.clipboard.enable)
+  {
+    caps->request = request ? 1 : 0;
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_BY_DEMAND);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_CLIPBOARD_SELECTION);
+  }
 
   if (!agent_startMsg(VD_AGENT_ANNOUNCE_CAPABILITIES, capsSize) ||
       !agent_writeMsg(caps, capsSize))
@@ -530,23 +528,6 @@ bool purespice_clipboardRequest(PSDataType type)
     PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_REQUEST");
     return false;
   }
-
-  return true;
-}
-
-bool purespice_setClipboardCb(
-    PSClipboardNotice  cbNoticeFn,
-    PSClipboardData    cbDataFn,
-    PSClipboardRelease cbReleaseFn,
-    PSClipboardRequest cbRequestFn)
-{
-  if ((cbNoticeFn && !cbDataFn) || (cbDataFn && !cbNoticeFn))
-    return false;
-
-  agent.cbNoticeFn  = cbNoticeFn;
-  agent.cbDataFn    = cbDataFn;
-  agent.cbReleaseFn = cbReleaseFn;
-  agent.cbRequestFn = cbRequestFn;
 
   return true;
 }

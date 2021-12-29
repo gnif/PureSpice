@@ -63,6 +63,25 @@ typedef struct PSConfig
 
   struct
   {
+    /* enable clipboard support if available */
+    bool enable;
+
+    /* called with the data type available by the agent */
+    void (*notice)(const PSDataType type);
+
+    /* called with the clipboard data */
+    void (*data)(const PSDataType type, uint8_t * buffer, uint32_t size);
+
+    /* called to notify that there is no longer any clipboard data available */
+    void (*release)(void);
+
+    /* called to request clipboard data of the specified type */
+    void (*request)(const PSDataType type);
+  }
+  clipboard;
+
+  struct
+  {
     /* enable the playback channel if available */
     bool enable;
 
@@ -85,13 +104,6 @@ typedef struct PSConfig
   playback;
 }
 PSConfig;
-
-typedef void (*PSClipboardNotice )(const PSDataType type);
-typedef void (*PSClipboardData   )(const PSDataType type,
-    uint8_t * buffer, uint32_t size);
-typedef void (*PSClipboardRelease)();
-typedef void (*PSClipboardRequest)(const PSDataType type);
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -117,13 +129,6 @@ bool purespice_clipboardRelease();
 
 bool purespice_clipboardDataStart(PSDataType type, size_t size);
 bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size);
-
-/* events */
-bool purespice_setClipboardCb(
-    PSClipboardNotice  cbNoticeFn,
-    PSClipboardData    cbDataFn,
-    PSClipboardRelease cbReleaseFn,
-    PSClipboardRequest cbRequestFn);
 
 #ifdef __cplusplus
 }
