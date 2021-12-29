@@ -26,18 +26,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "messages.h"
 
-struct PSPlayback
-{
-  void (*start)(int channels, int sampleRate, PSAudioFormat format,
-    uint32_t time);
-  void (*volume)(int channels, const uint16_t volume[]);
-  void (*mute)(bool mute);
-  void (*stop)(void);
-  void (*data)(uint8_t * data, size_t size);
-};
-
-static struct PSPlayback pb = { 0 };
-
 PS_STATUS channelPlayback_onRead(int * dataAvailable)
 {
   struct PSChannel *channel = &g_ps.scPlayback;
@@ -64,15 +52,11 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         return status;
       }
 
-      if (pb.start)
-      {
-        PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
-        if (in.format == SPICE_AUDIO_FMT_S16)
-          fmt = PS_AUDIO_FMT_S16;
+      PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
+      if (in.format == SPICE_AUDIO_FMT_S16)
+        fmt = PS_AUDIO_FMT_S16;
 
-        pb.start(in.channels, in.frequency, fmt, in.time);
-      }
-
+      g_ps.config.playback.start(in.channels, in.frequency, fmt, in.time);
       return PS_STATUS_OK;
     }
 
@@ -87,15 +71,12 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         return status;
       }
 
-      if (pb.data)
-        pb.data(in->data, header.size - sizeof(*in));
-
+      g_ps.config.playback.data(in->data, header.size - sizeof(*in));
       return PS_STATUS_OK;
     }
 
     case SPICE_MSG_PLAYBACK_STOP:
-      if (pb.stop)
-        pb.stop();
+      g_ps.config.playback.stop();
       return PS_STATUS_OK;
 
     case SPICE_MSG_PLAYBACK_VOLUME:
@@ -109,8 +90,8 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         return status;
       }
 
-      if (pb.volume)
-        pb.volume(in->nchannels, in->volume);
+      if (g_ps.config.playback.volume)
+        g_ps.config.playback.volume(in->nchannels, in->volume);
 
       return PS_STATUS_OK;
     }
@@ -125,8 +106,8 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         return status;
       }
 
-      if (pb.mute)
-        pb.mute(in.mute);
+      if (g_ps.config.playback.mute)
+        g_ps.config.playback.mute(in.mute);
 
       return PS_STATUS_OK;
     }
@@ -140,25 +121,4 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
   }
 
   return PS_STATUS_OK;
-}
-
-bool purespice_setAudioCb(
-  void (*start)(int channels, int sampleRate, PSAudioFormat format,
-    uint32_t time),
-  void (*volume)(int channels, const uint16_t volume[]),
-  void (*mute)(bool mute),
-  void (*stop)(void),
-  void (*data)(uint8_t * data, size_t size)
-)
-{
-  if (!start || !stop || !data)
-    return false;
-
-  pb.start  = start;
-  pb.volume = volume;
-  pb.mute   = mute;
-  pb.stop   = stop;
-  pb.data   = data;
-
-  return true;
 }

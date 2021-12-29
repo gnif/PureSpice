@@ -24,6 +24,36 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <purespice.h>
 
+static void playback_start(int channels, int sampleRate, PSAudioFormat format,
+        uint32_t time)
+{
+  printf("playback_start(ch: %d, sampleRate: %d, format: %d, time: %u)\n",
+      channels, sampleRate, format, time);
+}
+
+static void playback_volume(int channels, const uint16_t volume[])
+{
+  printf("playback_volume(ch: %d ", channels);
+  for(int i = 0; i < channels; ++i)
+    printf(", %d: %u", i, volume[i]);
+  puts(")\n");
+}
+
+static void playback_mute(bool mute)
+{
+  printf("playback_mute(%d)\n", mute);
+}
+
+static void playback_stop(void)
+{
+  printf("playback_stop\n");
+}
+
+static void playback_data(uint8_t * data, size_t size)
+{
+  printf("playback_data(0x%p, %lu)\n", data, size);
+}
+
 int main(int argc, char * argv[])
 {
   char * host;
@@ -66,30 +96,31 @@ int main(int argc, char * argv[])
     .host     = host,
     .port     = port,
     .password = "",
-    .playback = true
+    .playback =
+    {
+      .enable = true,
+      .start  = playback_start,
+      .volume = playback_volume,
+      .mute   = playback_mute,
+      .stop   = playback_stop,
+      .data   = playback_data
+    }
   };
 
-
-  printf("attempting to connect to %s:%d...", host, port);
-  fflush(stdout);
   if (!purespice_connect(&config))
   {
     printf("spice connect failed\n");
     retval = -1;
     goto err_exit;
   }
-  printf("done.\n");
 
-  printf("waiting for comms setup...");
-  fflush(stdout);
+  /* wait for purespice to be ready */
   while(!purespice_ready())
     if (!purespice_process(1))
     {
-      printf("fail\n");
       retval = -1;
       goto err_exit;
     }
-  printf("done.\n");
 
   /* Create the parent window */
   ADLWindowDef winDef =

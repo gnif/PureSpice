@@ -71,6 +71,21 @@ bool purespice_connect(const PSConfig * config)
     goto err_password;
   }
 
+  if (g_ps.config.playback.enable)
+  {
+    if (!g_ps.config.playback.start)
+    {
+      PS_LOG_ERROR("playback->start is mandatory");
+      goto err_password;
+    }
+
+    if (!g_ps.config.playback.data)
+    {
+      PS_LOG_ERROR("playback->data is mandatory");
+      goto err_password;
+    }
+  }
+
   memset(&g_ps.addr, 0, sizeof(g_ps.addr));
 
   if (g_ps.config.port == 0)

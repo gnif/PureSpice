@@ -47,7 +47,6 @@ typedef struct PSConfig
   const char * host;
   unsigned     port;
   const char * password;
-  bool         playback;
 
   struct
   {
@@ -61,6 +60,29 @@ typedef struct PSConfig
         const char * format, ...) __attribute__((format (printf, 4, 5)));
   }
   log;
+
+  struct
+  {
+    /* enable the playback channel if available */
+    bool enable;
+
+    /* called with the details of the stream to open */
+    void (*start)(int channels, int sampleRate, PSAudioFormat format,
+        uint32_t time);
+
+    /* [optional] called with the volume of each channel to set */
+    void (*volume)(int channels, const uint16_t volume[]);
+
+    /* [optional] called to mute/unmute the stream */
+    void (*mute)(bool mute);
+
+    /* called when the guest stops the audio stream */
+    void (*stop)(void);
+
+    /* called when there are audio samples */
+    void (*data)(uint8_t * data, size_t size);
+  }
+  playback;
 }
 PSConfig;
 
@@ -102,15 +124,6 @@ bool purespice_setClipboardCb(
     PSClipboardData    cbDataFn,
     PSClipboardRelease cbReleaseFn,
     PSClipboardRequest cbRequestFn);
-
-bool purespice_setAudioCb(
-  void (*start)(int channels, int sampleRate, PSAudioFormat format,
-    uint32_t time),
-  void (*volume)(int channels, const uint16_t volume[]),
-  void (*mute)(bool mute),
-  void (*stop)(void),
-  void (*data)(uint8_t * data, size_t size)
-);
 
 #ifdef __cplusplus
 }
