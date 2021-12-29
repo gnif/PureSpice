@@ -18,7 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "purespice.h"
-
+#include "log.h"
 #include "channel.h"
 #include "locking.h"
 #include "messages.h"
@@ -71,12 +71,16 @@ PS_STATUS channel_connect(struct PSChannel * channel)
       break;
 
     default:
+      PS_LOG_ERROR("BUG: invalid address family");
       return PS_STATUS_ERROR;
   }
 
   channel->socket = socket(g_ps.family, SOCK_STREAM, 0);
   if (channel->socket == -1)
+  {
+    PS_LOG_ERROR("Socket creation failed");
     return PS_STATUS_ERROR;
+  }
 
   if (g_ps.family != AF_UNIX)
   {
@@ -88,6 +92,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (connect(channel->socket, &g_ps.addr.addr, addrSize) == -1)
   {
     close(channel->socket);
+    PS_LOG_ERROR("Socket connect failed");
     return PS_STATUS_ERROR;
   }
 
@@ -133,6 +138,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (channel_writeNL(channel, &p, sizeof(p)) != sizeof(p))
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
 
@@ -140,6 +146,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
           NULL)) != PS_STATUS_OK)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to read the reply to the connect packet");
     return status;
   }
 
@@ -147,12 +154,14 @@ PS_STATUS channel_connect(struct PSChannel * channel)
       p.header.major_version != SPICE_VERSION_MAJOR)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
   if (p.header.size < sizeof(SpiceLinkReply))
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
     return PS_STATUS_ERROR;
   }
 
@@ -167,6 +176,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (reply.error != SPICE_LINK_ERR_OK)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Server reported link error: %d", reply.error);
     return PS_STATUS_ERROR;
   }
 
@@ -178,6 +188,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
           &capsChannel, sizeof(capsChannel), NULL)) != PS_STATUS_OK)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to read the channel capabillities");
     return status;
   }
 
@@ -186,6 +197,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (channel_writeNL(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to write the auth mechanisim packet");
     return PS_STATUS_ERROR;
   }
 
@@ -193,6 +205,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (!purespice_rsaEncryptPassword(reply.pub_key, g_ps.config.password, &pass))
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to encrypt the password");
     return PS_STATUS_ERROR;
   }
 
@@ -200,6 +213,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   {
     purespice_rsaFreePassword(&pass);
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
 
@@ -210,12 +224,14 @@ PS_STATUS channel_connect(struct PSChannel * channel)
           NULL)) != PS_STATUS_OK)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Failed to read the authentication response");
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
     channel_disconnect(channel);
+    PS_LOG_ERROR("Server reported link error: %u", linkResult);
     return PS_STATUS_ERROR;
   }
 
@@ -290,7 +306,10 @@ PS_STATUS channel_onRead(struct PSChannel * channel, SpiceMiniDataHeader * heade
       SpiceMsgSetAck in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgSetAck");
         return status;
+      }
 
       channel->ackFrequency = in.window;
 
@@ -307,20 +326,31 @@ PS_STATUS channel_onRead(struct PSChannel * channel, SpiceMiniDataHeader * heade
       SpiceMsgPing in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgPing");
         return status;
+      }
 
       const int discard = header->size - sizeof(in);
       if ((status = channel_discardNL(channel, discard,
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to discard the ping data");
         return status;
+      }
 
       SpiceMsgcPong * out =
         SPICE_PACKET(SPICE_MSGC_PONG, SpiceMsgcPong, 0);
 
       out->id        = in.id;
       out->timestamp = in.timestamp;
-      return SPICE_SEND_PACKET(channel, out) ?
-        PS_STATUS_HANDLED : PS_STATUS_ERROR;
+      if (!SPICE_SEND_PACKET(channel, out))
+      {
+        PS_LOG_ERROR("Failed to send SpiceMsgcPong");
+        return PS_STATUS_ERROR;
+      }
+
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_WAIT_FOR_CHANNELS:
@@ -329,6 +359,7 @@ PS_STATUS channel_onRead(struct PSChannel * channel, SpiceMiniDataHeader * heade
     case SPICE_MSG_DISCONNECTING:
     {
       shutdown(channel->socket, SHUT_WR);
+      PS_LOG_INFO("Server sent disconnect message");
       return PS_STATUS_HANDLED;
     }
 
@@ -337,10 +368,12 @@ PS_STATUS channel_onRead(struct PSChannel * channel, SpiceMiniDataHeader * heade
       SpiceMsgNotify * in = (SpiceMsgNotify *)alloca(header->size);
       if ((status = channel_readNL(channel, in, header->size,
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgNotify");
         return status;
+      }
 
-      //TODO: send this to a logging function/interface
-
+      PS_LOG_INFO("[notify] %s", in->message);
       return PS_STATUS_HANDLED;
     }
   }
@@ -360,7 +393,13 @@ bool channel_ack(struct PSChannel * channel)
 
   char * ack = SPICE_PACKET(SPICE_MSGC_ACK, char, 0);
   *ack = 0;
-  return SPICE_SEND_PACKET(channel, ack);
+  if (!SPICE_SEND_PACKET(channel, ack))
+  {
+    PS_LOG_ERROR("Failed to write ack packet");
+    return false;
+  }
+
+  return true;
 }
 
 ssize_t channel_writeNL(const struct PSChannel * channel,
@@ -379,10 +418,16 @@ PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
     const ssize_t size, int * dataAvailable)
 {
   if (!channel->connected)
+  {
+    PS_LOG_ERROR("BUG: attempted to read from a closed channel");
     return PS_STATUS_ERROR;
+  }
 
   if (!buffer)
+  {
+    PS_LOG_ERROR("BUG: attempted to read into a NULL buffer");
     return PS_STATUS_ERROR;
+  }
 
   size_t    left = size;
   uint8_t * buf  = (uint8_t *)buffer;
@@ -395,6 +440,7 @@ PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
     if (len < 0)
     {
       channel->connected = false;
+      PS_LOG_ERROR("Failed to read from the socket: %ld", len);
       return PS_STATUS_ERROR;
     }
     left -= len;
@@ -421,6 +467,7 @@ PS_STATUS channel_discardNL(struct PSChannel * channel,
     if (len < 0)
     {
       channel->connected = false;
+      PS_LOG_ERROR("Failed to read from the socket: %ld", len);
       return PS_STATUS_ERROR;
     }
 

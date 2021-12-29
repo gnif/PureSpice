@@ -17,6 +17,7 @@ this program; if not, write to the Free Software Foundation, Inc., 59 Temple
 Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
+#include "log.h"
 #include "channel_main.h"
 #include "channel.h"
 #include "agent.h"
@@ -38,6 +39,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
     if (header.type != SPICE_MSG_MAIN_INIT)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Expected SPICE_MSG_MAIN_INIT but got %d", header.type);
       return PS_STATUS_ERROR;
     }
 
@@ -47,26 +49,34 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
             dataAvailable)) != PS_STATUS_OK)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to read SpiceMsgMainInit");
       return status;
     }
 
     g_ps.sessionID = msg.session_id;
     agent_setServerTokens(msg.agent_tokens);
 
-    if (msg.agent_connected && (status = agent_connect()) != PS_STATUS_OK)
+    if (msg.agent_connected)
     {
-      purespice_disconnect();
-      return status;
+      if ((status = agent_connect()) != PS_STATUS_OK)
+      {
+        purespice_disconnect();
+        return status;
+      }
     }
 
     if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT &&
         !purespice_mouseMode(false))
+    {
+      PS_LOG_ERROR("Failed to set the initial mouse mode");
       return PS_STATUS_ERROR;
+    }
 
     void * packet = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, 0, 0);
     if (!SPICE_SEND_PACKET(channel, packet))
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to write SPICE_MSGC_MAIN_ATTACH_CHANNELS");
       return PS_STATUS_ERROR;
     }
 
@@ -80,6 +90,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
             dataAvailable)) != PS_STATUS_OK)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to read SpiceMainChannelsList");
       return status;
     }
 
@@ -91,6 +102,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
           if (g_ps.scInputs.connected)
           {
             purespice_disconnect();
+            PS_LOG_ERROR("Server asked us to reconnect to the input channel");
             return PS_STATUS_ERROR;
           }
 
@@ -98,8 +110,11 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
               != PS_STATUS_OK)
           {
             purespice_disconnect();
+            PS_LOG_ERROR("Failed to connect to the input channel");
             return status;
           }
+
+          PS_LOG_INFO("Connected to the input channel");
 
           if (g_ps.scPlayback.connected)
             return PS_STATUS_OK;
@@ -112,6 +127,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
           if (g_ps.scPlayback.connected)
           {
             purespice_disconnect();
+            PS_LOG_ERROR("Server asked us to reconnect to the playback channel");
             return PS_STATUS_ERROR;
           }
 
@@ -119,8 +135,11 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
               != PS_STATUS_OK)
           {
             purespice_disconnect();
+            PS_LOG_ERROR("Failed to connect to the playback channel");
             return status;
           }
+
+          PS_LOG_INFO("Connected to the playback channel");
 
           if (g_ps.scInputs.connected)
             return PS_STATUS_OK;
@@ -138,6 +157,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
       purespice_disconnect();
       return status;
     }
+
     return PS_STATUS_OK;
   }
 
@@ -148,6 +168,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
             dataAvailable)) != PS_STATUS_OK)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to read the number of agent tokens");
       return status;
     }
 
@@ -157,6 +178,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
       purespice_disconnect();
       return status;
     }
+
     return PS_STATUS_OK;
   }
 
@@ -167,21 +189,31 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
             dataAvailable)) != PS_STATUS_OK)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to read SPICE_MSG_MAIN_AGENT_DISCONNECTED");
       return status;
     }
 
     agent_disconnect();
+    PS_LOG_WARN("Disconnected from the spice guest agent: %u", error);
     return PS_STATUS_OK;
   }
 
   if (header.type == SPICE_MSG_MAIN_AGENT_DATA)
   {
     if (!agent_present())
-      return channel_discardNL(channel, header.size, dataAvailable);
+      if ((status = channel_discardNL(channel, header.size,
+              dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to discard agent data");
+        return status;;
+      }
 
     if ((status = agent_process(header.size,
             dataAvailable)) != PS_STATUS_OK)
+    {
+      PS_LOG_ERROR("Failed to process agent data");
       purespice_disconnect();
+    }
 
     return status;
   }
@@ -193,6 +225,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
             dataAvailable)) != PS_STATUS_OK)
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to read the number of agent tokens");
       return status;
     }
 
@@ -200,6 +233,7 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
     if (!agent_processQueue())
     {
       purespice_disconnect();
+      PS_LOG_ERROR("Failed to process the agent queue");
       return PS_STATUS_ERROR;
     }
 

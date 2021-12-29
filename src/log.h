@@ -20,7 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #ifndef _H_I_LOG_
 #define _H_I_LOG_
 
-#include "purespice.h"
+#include "ps.h"
 
 #define _PS_LOG(func, fmt, ...) do { \
   func(__FILE__, __LINE__, __FUNCTION__, fmt, ##__VA_ARGS__); \

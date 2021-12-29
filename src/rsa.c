@@ -18,6 +18,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "rsa.h"
+#include "log.h"
 
 #include <spice/protocol.h>
 #include <malloc.h>
@@ -134,9 +135,14 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
   result->data = NULL;
 
 #if defined(USE_OPENSSL)
+  PS_LOG_INFO("Using OpenSSL");
+
   BIO *bioKey = BIO_new(BIO_s_mem());
   if (!bioKey)
+  {
+    PS_LOG_ERROR("BIO_new failed");
     return false;
+  }
 
   BIO_write(bioKey, pub_key, SPICE_TICKET_PUBKEY_BYTES);
   EVP_PKEY *rsaKey = d2i_PUBKEY_bio(bioKey, NULL);
@@ -159,6 +165,7 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
 
     EVP_PKEY_free(rsaKey);
     BIO_free(bioKey);
+    PS_LOG_ERROR("RSA_public_encrypt failed");
     return false;
   }
 
@@ -168,6 +175,8 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
 #endif
 
 #if defined(USE_NETTLE)
+  PS_LOG_INFO("Using Nettle");
+
   struct asn1_der_iterator der;
   struct asn1_der_iterator j;
   struct rsa_public_key    pub;
@@ -184,7 +193,10 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
       && asn1_der_decode_bitstring_last(&der))
   {
     if (j.length != 9)
+    {
+      PS_LOG_ERROR("asn1 length invalid");
       return false;
+    }
 
     if (asn1_der_iterator_next(&j) == ASN1_ITERATOR_PRIMITIVE
         && j.type == ASN1_NULL
@@ -195,6 +207,7 @@ bool purespice_rsaEncryptPassword(uint8_t * pub_key, const char * password,
       if (!rsa_public_key_from_der_iterator(&pub, 0, &der))
       {
         rsa_public_key_clear(&pub);
+        PS_LOG_ERROR("rsa_public_key_from_der_iterator failed");
         return false;
       }
     }

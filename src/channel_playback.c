@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "purespice.h"
 
 #include "ps.h"
+#include "log.h"
 #include "channel.h"
 #include "channel_playback.h"
 
@@ -46,7 +47,10 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
   PS_STATUS status;
   if ((status = channel_onRead(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
+  {
+    PS_LOG_ERROR("Failed to read SpiceMiniDataHeader");
     return status;
+  }
 
   switch(header.type)
   {
@@ -55,7 +59,10 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
       SpiceMsgPlaybackStart in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgPlaybackStart");
         return status;
+      }
 
       if (pb.start)
       {
@@ -65,6 +72,7 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
 
         pb.start(in.channels, in.frequency, fmt, in.time);
       }
+
       return PS_STATUS_OK;
     }
 
@@ -74,7 +82,10 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         (SpiceMsgPlaybackPacket *)alloca(header.size);
       if ((status = channel_readNL(channel, in, header.size,
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgPlaybackPacket");
         return status;
+      }
 
       if (pb.data)
         pb.data(in->data, header.size - sizeof(*in));
@@ -93,7 +104,10 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
         (SpiceMsgAudioVolume *)alloca(header.size);
       if ((status = channel_readNL(channel, in, header.size,
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgAudioVolume");
         return status;
+      }
 
       if (pb.volume)
         pb.volume(in->nchannels, in->volume);
@@ -106,7 +120,10 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
       SpiceMsgAudioMute in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgAudioMute");
         return status;
+      }
 
       if (pb.mute)
         pb.mute(in.mute);
@@ -115,7 +132,14 @@ PS_STATUS channelPlayback_onRead(int * dataAvailable)
     }
   }
 
-  return channel_discardNL(channel, header.size, dataAvailable);
+  if ((status = channel_discardNL(channel, header.size,
+          dataAvailable) != PS_STATUS_OK))
+  {
+    PS_LOG_ERROR("Failed to discard %d bytes", header.size);
+    return status;
+  }
+
+  return PS_STATUS_OK;
 }
 
 bool purespice_setAudioCb(

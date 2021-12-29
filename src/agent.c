@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "purespice.h"
 
 #include "ps.h"
+#include "log.h"
 #include "channel.h"
 #include "channel_main.h"
 
@@ -86,16 +87,21 @@ PS_STATUS agent_connect(void)
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   memcpy(packet, &(uint32_t){SPICE_AGENT_TOKENS_MAX}, sizeof(uint32_t));
   if (!SPICE_SEND_PACKET(&g_ps.scMain, packet))
+  {
+    PS_LOG_ERROR("Failed to send SPICE_MSGC_MAIN_AGENT_START");
     return PS_STATUS_ERROR;
+  }
 
   agent.present = true;
   PS_STATUS ret = agent_sendCaps(true);
   if (ret != PS_STATUS_OK)
   {
     agent.present = false;
+    PS_LOG_ERROR("Failed to send our capabillities to the spice guest agent");
     return ret;
   }
 
+  PS_LOG_INFO("Connected to the spice guest agent");
   return PS_STATUS_OK;
 }
 
@@ -138,6 +144,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
       agent.cbBuffer = NULL;
       agent.cbRemain = 0;
       agent.cbSize   = 0;
+      PS_LOG_ERROR("Failed to read the remaining data");
       return status;
     }
 
@@ -162,12 +169,19 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
 
   if ((status = channel_readNL(&g_ps.scMain, &msg, sizeof(msg),
           dataAvailable)) != PS_STATUS_OK)
+  {
+    PS_LOG_ERROR("Failed to read the VDAgentMessage");
     return status;
+  }
 
   dataSize -= sizeof(msg);
 
   if (msg.protocol != VD_AGENT_PROTOCOL)
+  {
+    PS_LOG_ERROR("VDAgent protocol %d expected, but got %d",
+        VD_AGENT_PROTOCOL, msg.protocol);
     return PS_STATUS_ERROR;
+  }
 
   switch(msg.type)
   {
@@ -176,14 +190,21 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
       // make sure the message size is not insane to avoid a stack overflow
       // since we are using alloca for performance
       if (msg.size > 1024)
+      {
+        PS_LOG_ERROR("The spice guest agent sent an invalid message size: %d",
+            msg.size);
         return PS_STATUS_ERROR;
+      }
 
       VDAgentAnnounceCapabilities *caps =
         (VDAgentAnnounceCapabilities *)alloca(msg.size);
 
       if ((status = channel_readNL(&g_ps.scMain, caps, msg.size,
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read VDAgentAnnouceCapabilities");
         return status;
+      }
 
       const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg.size);
       agent.cbSupported  =
@@ -213,7 +234,10 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
         struct Selection selection;
         if ((status = channel_readNL(&g_ps.scMain, &selection, sizeof(selection),
                 dataAvailable)) != PS_STATUS_OK)
+        {
+          PS_LOG_ERROR("Failed to read the selection packet");
           return status;
+        }
         remaining -= sizeof(selection);
         dataSize  -= sizeof(selection);
       }
@@ -232,19 +256,32 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
         uint32_t type;
         if ((status = channel_readNL(&g_ps.scMain, &type, sizeof(type),
                 dataAvailable)) != PS_STATUS_OK)
+        {
+          PS_LOG_ERROR("Failed to read the clipboard data type");
           return status;
+        }
         remaining -= sizeof(type);
         dataSize  -= sizeof(type);
 
         if (msg.type == VD_AGENT_CLIPBOARD)
         {
           if (agent.cbBuffer)
+          {
+            PS_LOG_ERROR(
+                "Agent tried to send a new clipboard instead of remaining data");
             return PS_STATUS_ERROR;
+          }
 
           agent.cbSize     = 0;
           agent.cbRemain   = remaining;
           agent.cbBuffer   = (uint8_t *)malloc(remaining);
           const uint32_t r = remaining > dataSize ? dataSize : remaining;
+
+          if (!agent.cbBuffer)
+          {
+            PS_LOG_ERROR("Failed to malloc %d bytes", remaining);
+            return PS_STATUS_ERROR;
+          }
 
           if ((status = channel_readNL(&g_ps.scMain, agent.cbBuffer, r,
                   dataAvailable)) != PS_STATUS_OK)
@@ -253,6 +290,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
             agent.cbBuffer = NULL;
             agent.cbRemain = 0;
             agent.cbSize   = 0;
+            PS_LOG_ERROR("Failed to read the clipboard data");
             return status;
           }
 
@@ -279,12 +317,19 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
         // ensure the size is sane to avoid a stack overflow since we use alloca
         // for performance
         if (remaining > 1024)
+        {
+          PS_LOG_ERROR("The spice guest agent sent an invalid message size: %d",
+              msg.size);
           return PS_STATUS_ERROR;
+        }
 
         uint32_t *types = alloca(remaining);
         if ((status = channel_readNL(&g_ps.scMain, types, remaining,
                 dataAvailable)) != PS_STATUS_OK)
+        {
+          PS_LOG_ERROR("Failed to read the supported data types");
           return status;
+        }
 
         // there is zero documentation on the types field, it might be a bitfield
         // but for now we are going to assume it's not.
@@ -307,7 +352,14 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
     }
   }
 
-  return channel_discardNL(&g_ps.scMain, msg.size, dataAvailable);
+  if ((status = channel_discardNL(&g_ps.scMain, msg.size,
+          dataAvailable)) != PS_STATUS_OK)
+  {
+    PS_LOG_ERROR("Failed to discard %d bytes", msg.size);
+    return status;
+  }
+
+  return PS_STATUS_OK;
 }
 
 static void agent_onClipboard(void)
@@ -359,6 +411,7 @@ bool agent_processQueue(void)
     {
       SPICE_RAW_PACKET_FREE(msg);
       SPICE_UNLOCK(g_ps.scMain.lock);
+      PS_LOG_ERROR("Failed to send a queued packet");
       return false;
     }
     SPICE_RAW_PACKET_FREE(msg);
@@ -421,7 +474,10 @@ static PS_STATUS agent_sendCaps(bool request)
 
   if (!agent_startMsg(VD_AGENT_ANNOUNCE_CAPABILITIES, capsSize) ||
       !agent_writeMsg(caps, capsSize))
+  {
+    PS_LOG_ERROR("Failed to send our agent capabilities");
     return PS_STATUS_ERROR;
+  }
 
   return PS_STATUS_OK;
 }
@@ -470,7 +526,10 @@ bool purespice_clipboardRequest(PSDataType type)
   req.type = psTypeToAgentType(type);
   if (!agent_startMsg(VD_AGENT_CLIPBOARD_REQUEST, sizeof(req)) ||
       !agent_writeMsg(&req, sizeof(req)))
+  {
+    PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_REQUEST");
     return false;
+  }
 
   return true;
 }
@@ -518,7 +577,10 @@ bool purespice_clipboardGrab(PSDataType types[], int count)
 
     if (!agent_startMsg(VD_AGENT_CLIPBOARD_GRAB, size) ||
         !agent_writeMsg(msg, size))
+    {
+      PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_GRAB");
       return false;
+    }
 
     agent.cbClientGrabbed = true;
     return true;
@@ -530,7 +592,10 @@ bool purespice_clipboardGrab(PSDataType types[], int count)
 
   if (!agent_startMsg(VD_AGENT_CLIPBOARD_GRAB, sizeof(msg)) ||
       !agent_writeMsg(&msg, sizeof(msg)))
+  {
+    PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_GRAB");
     return false;
+  }
 
   agent.cbClientGrabbed = true;
   return true;
@@ -550,14 +615,20 @@ bool purespice_clipboardRelease()
     uint8_t req[4] = { VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD };
     if (!agent_startMsg(VD_AGENT_CLIPBOARD_RELEASE, sizeof(req)) ||
         !agent_writeMsg(req, sizeof(req)))
+    {
+      PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD");
       return false;
+    }
 
     agent.cbClientGrabbed = false;
     return true;
   }
 
    if (!agent_startMsg(VD_AGENT_CLIPBOARD_RELEASE, 0))
+   {
+     PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_RELEASE");
      return false;
+   }
 
    agent.cbClientGrabbed = false;
    return true;
@@ -584,8 +655,19 @@ bool purespice_clipboardDataStart(PSDataType type, size_t size)
     ((uint32_t*)buffer)[0] = psTypeToAgentType(type);
   }
 
-  return agent_startMsg(VD_AGENT_CLIPBOARD, bufSize + size) &&
-    agent_writeMsg(buffer, bufSize);
+  if (!agent_startMsg(VD_AGENT_CLIPBOARD, bufSize + size))
+  {
+    PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD start");
+    return false;
+  }
+
+  if (!agent_writeMsg(buffer, bufSize))
+  {
+    PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD data");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size)

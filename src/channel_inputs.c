@@ -20,6 +20,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "purespice.h"
 
 #include "ps.h"
+#include "log.h"
 #include "channel.h"
 #include "messages.h"
 
@@ -41,14 +42,20 @@ PS_STATUS channelInputs_onRead(int * dataAvailable)
     case SPICE_MSG_INPUTS_INIT:
     {
       if (channel->initDone)
+      {
+        PS_LOG_ERROR("Got SPICE_MSG_INPUTS_INIT before initDone");
         return PS_STATUS_ERROR;
+      }
 
       channel->initDone = true;
 
       SpiceMsgInputsInit in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgInputsInit");
         return status;
+      }
 
       return PS_STATUS_OK;
     }
@@ -58,7 +65,10 @@ PS_STATUS channelInputs_onRead(int * dataAvailable)
       SpiceMsgInputsInit in;
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
+      {
+        PS_LOG_ERROR("Failed to read SpiceMsgInputsInit");
         return status;
+      }
 
       g_ps.kb.modifiers = in.modifiers;
       return PS_STATUS_OK;
@@ -68,12 +78,24 @@ PS_STATUS channelInputs_onRead(int * dataAvailable)
     {
       const int count = atomic_fetch_sub(&g_ps.mouse.sentCount,
           SPICE_INPUT_MOTION_ACK_BUNCH);
-      return (count >= SPICE_INPUT_MOTION_ACK_BUNCH) ?
-        PS_STATUS_OK : PS_STATUS_ERROR;
+      if (count < SPICE_INPUT_MOTION_ACK_BUNCH)
+      {
+        PS_LOG_ERROR("Server sent an ack for more messages then expected");
+        return PS_STATUS_ERROR;
+      }
+
+      return PS_STATUS_OK;
     }
   }
 
-  return channel_discardNL(channel, header.size, dataAvailable);
+  if ((status = channel_discardNL(channel, header.size,
+          dataAvailable)) != PS_STATUS_OK)
+  {
+    PS_LOG_ERROR("Failed to discard %d bytes", header.size);
+    return status;
+  }
+
+  return PS_STATUS_OK;
 }
 
 bool purespice_keyDown(uint32_t code)
@@ -88,7 +110,14 @@ bool purespice_keyDown(uint32_t code)
     SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_DOWN,
         SpiceMsgcKeyDown, 0);
   msg->code = code;
-  return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+
+  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to send SpiceMsgcKeyDown");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_keyUp(uint32_t code)
@@ -105,7 +134,14 @@ bool purespice_keyUp(uint32_t code)
     SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_UP,
         SpiceMsgcKeyUp, 0);
   msg->code = code;
-  return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+
+  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to send SpiceMsgcKeyUp");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_keyModifiers(uint32_t modifiers)
@@ -117,7 +153,14 @@ bool purespice_keyModifiers(uint32_t modifiers)
     SPICE_PACKET(SPICE_MSGC_INPUTS_KEY_MODIFIERS,
         SpiceMsgcInputsKeyModifiers, 0);
   msg->modifiers = modifiers;
-  return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+
+  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to send SpiceMsgcInputsKeyModifiers");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_mouseMode(bool server)
@@ -130,7 +173,14 @@ bool purespice_mouseMode(bool server)
     SpiceMsgcMainMouseModeRequest, 0);
 
   msg->mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
-  return SPICE_SEND_PACKET(&g_ps.scMain, msg);
+
+  if (!SPICE_SEND_PACKET(&g_ps.scMain, msg))
+  {
+    PS_LOG_ERROR("Failed to send SpiceMsgcMainMouseModeRequest");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_mousePosition(uint32_t x, uint32_t y)
@@ -150,7 +200,10 @@ bool purespice_mousePosition(uint32_t x, uint32_t y)
 
   atomic_fetch_add(&g_ps.mouse.sentCount, 1);
   if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to send SpiceMsgcMousePosition");
     return false;
+  }
 
   return true;
 }
@@ -181,7 +234,13 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
     SPICE_UNLOCK(g_ps.mouse.lock);
 
     atomic_fetch_add(&g_ps.mouse.sentCount, 1);
-    return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+    if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+    {
+      PS_LOG_ERROR("Failed to send SpiceMsgcMouseMotion");
+      return false;
+    }
+
+    return true;
   }
 
   const ssize_t bufferSize = (
@@ -225,7 +284,13 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
   const ssize_t wrote = send(g_ps.scInputs.socket, buffer, bufferSize, 0);
   SPICE_UNLOCK(g_ps.scInputs.lock);
 
-  return wrote == bufferSize;
+  if (wrote != bufferSize)
+  {
+    PS_LOG_ERROR("Only wrote %ld of the expected %ld bytes", wrote, bufferSize);
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_mousePress(uint32_t button)
@@ -255,7 +320,13 @@ bool purespice_mousePress(uint32_t button)
   msg->button_state = g_ps.mouse.buttonState;
   SPICE_UNLOCK(g_ps.mouse.lock);
 
-  return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to write SpiceMsgcMousePress");
+    return false;
+  }
+
+  return true;
 }
 
 bool purespice_mouseRelease(uint32_t button)
@@ -285,5 +356,11 @@ bool purespice_mouseRelease(uint32_t button)
   msg->button_state = g_ps.mouse.buttonState;
   SPICE_UNLOCK(g_ps.mouse.lock);
 
-  return SPICE_SEND_PACKET(&g_ps.scInputs, msg);
+  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  {
+    PS_LOG_ERROR("Failed to write SpiceMsgcMouseRelease");
+    return false;
+  }
+
+  return true;
 }
