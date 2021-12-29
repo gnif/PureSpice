@@ -30,6 +30,10 @@ static void log_stdout(const char * file, unsigned int line,
     const char * function, const char * format, ...)
 {
   va_list va;
+
+  const char * f = strrchr(file, '/') + 1;
+  fprintf(stdout, "%s:%d (%s): ", f, line, function);
+
   va_start(va, format);
   vfprintf(stdout, format, va);
   va_end(va);
@@ -40,6 +44,10 @@ static void log_stderr(const char * file, unsigned int line,
     const char * function, const char * format, ...)
 {
   va_list va;
+
+  const char * f = strrchr(file, '/') + 1;
+  fprintf(stderr, "%s:%d (%s): ", f, line, function);
+
   va_start(va, format);
   vfprintf(stderr, format, va);
   va_end(va);
