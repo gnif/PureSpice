@@ -208,7 +208,7 @@ PSStatus purespice_process(int timeout)
 
   int nfds = epoll_wait(g_ps.epollfd, events, MAX_EVENTS, timeout);
   if (nfds == 0)
-    return true;
+    return PS_STATUS_RUN;
 
   if (nfds < 0)
   {
