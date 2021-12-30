@@ -146,7 +146,7 @@ int main(int argc, char * argv[])
 
   /* wait for purespice to be ready */
   while(!purespice_ready())
-    if (!purespice_process(1))
+    if (purespice_process(1) != PS_STATUS_RUN)
     {
       retval = -1;
       goto err_exit;

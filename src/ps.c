@@ -201,7 +201,7 @@ bool purespice_ready()
          g_ps.scInputs.connected;
 }
 
-bool purespice_process(int timeout)
+PSStatus purespice_process(int timeout)
 {
   #define MAX_EVENTS 4
   static struct epoll_event events[MAX_EVENTS];
@@ -213,7 +213,7 @@ bool purespice_process(int timeout)
   if (nfds < 0)
   {
     PS_LOG_ERROR("epoll_err returned %d", nfds);
-    return false;
+    return PS_STATUS_ERR_POLL;
   }
 
   for(int i = 0; i < nfds; ++i)
@@ -244,19 +244,19 @@ bool purespice_process(int timeout)
             break;
 
           default:
-            return false;
+            return PS_STATUS_ERR_READ;
         }
 
         if (channel->connected && !channel_ack(channel))
         {
           PS_LOG_ERROR("Failed to send message ack");
-          return false;
+          return PS_STATUS_ERR_ACK;
         }
       }
   }
 
   if (g_ps.scMain.connected || g_ps.scInputs.connected)
-    return true;
+    return PS_STATUS_RUN;
 
   g_ps.sessionID = 0;
 
@@ -267,5 +267,5 @@ bool purespice_process(int timeout)
     close(g_ps.scMain.socket);
 
   PS_LOG_INFO("Shutdown");
-  return false;
+  return PS_STATUS_SHUTDOWN;
 }

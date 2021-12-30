@@ -23,6 +23,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdbool.h>
 #include <stdint.h>
 
+typedef enum PSStatus
+{
+  PS_STATUS_RUN,
+  PS_STATUS_SHUTDOWN,
+  PS_STATUS_ERR_POLL,
+  PS_STATUS_ERR_READ,
+  PS_STATUS_ERR_ACK
+}
+PSStatus;
+
 typedef enum PSDataType
 {
   SPICE_DATA_TEXT,
@@ -111,7 +121,7 @@ extern "C" {
 
 bool purespice_connect(const struct PSConfig * config);
 void purespice_disconnect();
-bool purespice_process(int timeout);
+PSStatus purespice_process(int timeout);
 bool purespice_ready();
 
 bool purespice_keyDown      (uint32_t code);
