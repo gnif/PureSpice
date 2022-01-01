@@ -26,10 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdlib.h>
 
-PS_STATUS channelInputs_onRead(int * dataAvailable)
+PS_STATUS channelInputs_onRead(struct PSChannel * channel, int * dataAvailable)
 {
-  struct PSChannel *channel = &g_ps.scInputs;
-
   SpiceMiniDataHeader header;
 
   PS_STATUS status;
@@ -100,7 +98,8 @@ PS_STATUS channelInputs_onRead(int * dataAvailable)
 
 bool purespice_keyDown(uint32_t code)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   if (code > 0x100)
@@ -111,7 +110,7 @@ bool purespice_keyDown(uint32_t code)
         SpiceMsgcKeyDown, 0);
   msg->code = code;
 
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to send SpiceMsgcKeyDown");
     return false;
@@ -122,7 +121,8 @@ bool purespice_keyDown(uint32_t code)
 
 bool purespice_keyUp(uint32_t code)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   if (code < 0x100)
@@ -135,7 +135,7 @@ bool purespice_keyUp(uint32_t code)
         SpiceMsgcKeyUp, 0);
   msg->code = code;
 
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to send SpiceMsgcKeyUp");
     return false;
@@ -146,7 +146,8 @@ bool purespice_keyUp(uint32_t code)
 
 bool purespice_keyModifiers(uint32_t modifiers)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   SpiceMsgcInputsKeyModifiers * msg =
@@ -154,7 +155,7 @@ bool purespice_keyModifiers(uint32_t modifiers)
         SpiceMsgcInputsKeyModifiers, 0);
   msg->modifiers = modifiers;
 
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to send SpiceMsgcInputsKeyModifiers");
     return false;
@@ -165,7 +166,8 @@ bool purespice_keyModifiers(uint32_t modifiers)
 
 bool purespice_mouseMode(bool server)
 {
-  if (!g_ps.scMain.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  if (!channel->connected)
     return false;
 
   SpiceMsgcMainMouseModeRequest * msg = SPICE_PACKET(
@@ -174,7 +176,7 @@ bool purespice_mouseMode(bool server)
 
   msg->mouse_mode = server ? SPICE_MOUSE_MODE_SERVER : SPICE_MOUSE_MODE_CLIENT;
 
-  if (!SPICE_SEND_PACKET(&g_ps.scMain, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to send SpiceMsgcMainMouseModeRequest");
     return false;
@@ -185,7 +187,8 @@ bool purespice_mouseMode(bool server)
 
 bool purespice_mousePosition(uint32_t x, uint32_t y)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   SpiceMsgcMousePosition * msg =
@@ -199,7 +202,7 @@ bool purespice_mousePosition(uint32_t x, uint32_t y)
   SPICE_UNLOCK(g_ps.mouse.lock);
 
   atomic_fetch_add(&g_ps.mouse.sentCount, 1);
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to send SpiceMsgcMousePosition");
     return false;
@@ -210,7 +213,8 @@ bool purespice_mousePosition(uint32_t x, uint32_t y)
 
 bool purespice_mouseMotion(int32_t x, int32_t y)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   /* while the protocol supports movements greater then +-127 the QEMU
@@ -234,7 +238,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
     SPICE_UNLOCK(g_ps.mouse.lock);
 
     atomic_fetch_add(&g_ps.mouse.sentCount, 1);
-    if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+    if (!SPICE_SEND_PACKET(channel, msg))
     {
       PS_LOG_ERROR("Failed to send SpiceMsgcMouseMotion");
       return false;
@@ -280,9 +284,9 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
 
   atomic_fetch_add(&g_ps.mouse.sentCount, msgs);
 
-  SPICE_LOCK(g_ps.scInputs.lock);
-  const ssize_t wrote = send(g_ps.scInputs.socket, buffer, bufferSize, 0);
-  SPICE_UNLOCK(g_ps.scInputs.lock);
+  SPICE_LOCK(channel->lock);
+  const ssize_t wrote = send(channel->socket, buffer, bufferSize, 0);
+  SPICE_UNLOCK(channel->lock);
 
   if (wrote != bufferSize)
   {
@@ -295,7 +299,8 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
 
 bool purespice_mousePress(uint32_t button)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   SPICE_LOCK(g_ps.mouse.lock);
@@ -320,7 +325,7 @@ bool purespice_mousePress(uint32_t button)
   msg->button_state = g_ps.mouse.buttonState;
   SPICE_UNLOCK(g_ps.mouse.lock);
 
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to write SpiceMsgcMousePress");
     return false;
@@ -331,7 +336,8 @@ bool purespice_mousePress(uint32_t button)
 
 bool purespice_mouseRelease(uint32_t button)
 {
-  if (!g_ps.scInputs.connected)
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  if (!channel->connected)
     return false;
 
   SPICE_LOCK(g_ps.mouse.lock);
@@ -356,7 +362,7 @@ bool purespice_mouseRelease(uint32_t button)
   msg->button_state = g_ps.mouse.buttonState;
   SPICE_UNLOCK(g_ps.mouse.lock);
 
-  if (!SPICE_SEND_PACKET(&g_ps.scInputs, msg))
+  if (!SPICE_SEND_PACKET(channel, msg))
   {
     PS_LOG_ERROR("Failed to write SpiceMsgcMouseRelease");
     return false;

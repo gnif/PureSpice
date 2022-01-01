@@ -105,6 +105,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef enum
 {
+  PS_CHANNEL_MAIN,
+  PS_CHANNEL_INPUTS,
+  PS_CHANNEL_PLAYBACK,
+
+  PS_CHANNEL_MAX
+}
+PSChannel;
+
+typedef enum
+{
   PS_STATUS_OK,
   PS_STATUS_HANDLED,
   PS_STATUS_NODATA,
@@ -115,16 +125,18 @@ PS_STATUS;
 // internal structures
 struct PSChannel
 {
+  uint8_t      spiceType;
+  const char * name;
+
+  PS_STATUS (*read)(struct PSChannel * channel, int * dataAvailable);
+
   bool        connected;
   bool        ready;
   bool        initDone;
-  uint8_t     channelType;
   int         socket;
   uint32_t    ackFrequency;
   uint32_t    ackCount;
   atomic_flag lock;
-
-  PS_STATUS (*read)(int * dataAvailable);
 };
 
 struct PS
@@ -144,10 +156,8 @@ struct PS
   uint32_t sessionID;
   uint32_t channelID;
 
-  int      epollfd;
-  struct   PSChannel scMain;
-  struct   PSChannel scInputs;
-  struct   PSChannel scPlayback;
+  int    epollfd;
+  struct PSChannel channels[PS_CHANNEL_MAX];
 
   struct
   {

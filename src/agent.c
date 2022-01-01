@@ -80,9 +80,10 @@ PS_STATUS agent_connect(void)
       SPICE_RAW_PACKET_FREE(msg);
   }
 
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   memcpy(packet, &(uint32_t){SPICE_AGENT_TOKENS_MAX}, sizeof(uint32_t));
-  if (!SPICE_SEND_PACKET(&g_ps.scMain, packet))
+  if (!SPICE_SEND_PACKET(channel, packet))
   {
     PS_LOG_ERROR("Failed to send SPICE_MSGC_MAIN_AGENT_START");
     return PS_STATUS_ERROR;
@@ -129,11 +130,13 @@ void agent_disconnect(void)
 
 PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
 {
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+
   PS_STATUS status;
   if (agent.cbRemain)
   {
     const uint32_t r = agent.cbRemain > dataSize ? dataSize : agent.cbRemain;
-    if ((status = channel_readNL(&g_ps.scMain, agent.cbBuffer + agent.cbSize, r,
+    if ((status = channel_readNL(channel, agent.cbBuffer + agent.cbSize, r,
             dataAvailable)) != PS_STATUS_OK)
     {
       free(agent.cbBuffer);
@@ -163,7 +166,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
   };
   #pragma pack(pop)
 
-  if ((status = channel_readNL(&g_ps.scMain, &msg, sizeof(msg),
+  if ((status = channel_readNL(channel, &msg, sizeof(msg),
           dataAvailable)) != PS_STATUS_OK)
   {
     PS_LOG_ERROR("Failed to read the VDAgentMessage");
@@ -195,7 +198,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
       VDAgentAnnounceCapabilities *caps =
         (VDAgentAnnounceCapabilities *)alloca(msg.size);
 
-      if ((status = channel_readNL(&g_ps.scMain, caps, msg.size,
+      if ((status = channel_readNL(channel, caps, msg.size,
               dataAvailable)) != PS_STATUS_OK)
       {
         PS_LOG_ERROR("Failed to read VDAgentAnnouceCapabilities");
@@ -228,7 +231,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
       if (agent.cbSelection)
       {
         struct Selection selection;
-        if ((status = channel_readNL(&g_ps.scMain, &selection, sizeof(selection),
+        if ((status = channel_readNL(channel, &selection, sizeof(selection),
                 dataAvailable)) != PS_STATUS_OK)
         {
           PS_LOG_ERROR("Failed to read the selection packet");
@@ -250,7 +253,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
           msg.type == VD_AGENT_CLIPBOARD_REQUEST)
       {
         uint32_t type;
-        if ((status = channel_readNL(&g_ps.scMain, &type, sizeof(type),
+        if ((status = channel_readNL(channel, &type, sizeof(type),
                 dataAvailable)) != PS_STATUS_OK)
         {
           PS_LOG_ERROR("Failed to read the clipboard data type");
@@ -279,7 +282,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
             return PS_STATUS_ERROR;
           }
 
-          if ((status = channel_readNL(&g_ps.scMain, agent.cbBuffer, r,
+          if ((status = channel_readNL(channel, agent.cbBuffer, r,
                   dataAvailable)) != PS_STATUS_OK)
           {
             free(agent.cbBuffer);
@@ -320,7 +323,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
         }
 
         uint32_t *types = alloca(remaining);
-        if ((status = channel_readNL(&g_ps.scMain, types, remaining,
+        if ((status = channel_readNL(channel, types, remaining,
                 dataAvailable)) != PS_STATUS_OK)
         {
           PS_LOG_ERROR("Failed to read the supported data types");
@@ -347,7 +350,7 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
     }
   }
 
-  if ((status = channel_discardNL(&g_ps.scMain, msg.size,
+  if ((status = channel_discardNL(channel, msg.size,
           dataAvailable)) != PS_STATUS_OK)
   {
     PS_LOG_ERROR("Failed to discard %d bytes", msg.size);
@@ -375,10 +378,12 @@ void agent_setServerTokens(unsigned int tokens)
 
 static bool agent_takeServerToken(void)
 {
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+
   unsigned int tokens;
   do
   {
-    if (!g_ps.scMain.connected)
+    if (!channel->connected)
       return false;
 
     tokens = atomic_load(&agent.serverTokens);
@@ -397,21 +402,23 @@ void agent_returnServerTokens(unsigned int tokens)
 
 bool agent_processQueue(void)
 {
-  SPICE_LOCK(g_ps.scMain.lock);
+  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+
+  SPICE_LOCK(channel->lock);
   while (queue_peek(agent.queue, NULL) && agent_takeServerToken())
   {
     void * msg;
     queue_shift(agent.queue, &msg);
-    if (!SPICE_SEND_PACKET_NL(&g_ps.scMain, msg))
+    if (!SPICE_SEND_PACKET_NL(channel, msg))
     {
       SPICE_RAW_PACKET_FREE(msg);
-      SPICE_UNLOCK(g_ps.scMain.lock);
+      SPICE_UNLOCK(channel->lock);
       PS_LOG_ERROR("Failed to send a queued packet");
       return false;
     }
     SPICE_RAW_PACKET_FREE(msg);
   }
-  SPICE_UNLOCK(g_ps.scMain.lock);
+  SPICE_UNLOCK(channel->lock);
   return true;
 }
 

@@ -26,10 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "messages.h"
 
-PS_STATUS channelPlayback_onRead(int * dataAvailable)
+PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable)
 {
-  struct PSChannel *channel = &g_ps.scPlayback;
-
   SpiceMiniDataHeader header;
 
   PS_STATUS status;

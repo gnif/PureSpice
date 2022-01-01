@@ -182,7 +182,8 @@ int main(int argc, char * argv[])
     switch(event.type)
     {
       case ADL_EVENT_NONE:
-        purespice_process(1);
+        if (purespice_process(1) != PS_STATUS_RUN)
+          goto err_shutdown;
         continue;
 
       case ADL_EVENT_CLOSE:
@@ -211,11 +212,7 @@ int main(int argc, char * argv[])
   }
 
 exit:
-  printf("shutdown...");
-  fflush(stdout);
   purespice_disconnect();
-  while(purespice_process(1)) {}
-  printf("done.\n");
 
 err_shutdown:
   adlShutdown();

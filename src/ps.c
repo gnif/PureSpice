@@ -44,12 +44,27 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 // globals
 struct PS g_ps =
 {
-  .scMain    .channelType = SPICE_CHANNEL_MAIN,
-  .scMain    .read        = channelMain_onRead,
-  .scInputs  .channelType = SPICE_CHANNEL_INPUTS,
-  .scInputs  .read        = channelInputs_onRead,
-  .scPlayback.channelType = SPICE_CHANNEL_PLAYBACK,
-  .scPlayback.read        = channelPlayback_onRead
+  .channels =
+  {
+    // PS_CHANNEL_MAIN
+    {
+      .spiceType = SPICE_CHANNEL_MAIN,
+      .name      = "MAIN",
+      .read      = channelMain_onRead,
+    },
+    // PS_CHANNEL_INPUTS
+    {
+      .spiceType = SPICE_CHANNEL_INPUTS,
+      .name      = "INPUTS",
+      .read      = channelInputs_onRead,
+    },
+    // PS_CHANNEL_PLAYBACK
+    {
+      .spiceType = SPICE_CHANNEL_PLAYBACK,
+      .name      = "PLAYBACK",
+      .read      = channelPlayback_onRead
+    }
+  }
 };
 
 bool purespice_connect(const PSConfig * config)
@@ -143,7 +158,7 @@ bool purespice_connect(const PSConfig * config)
   }
 
   g_ps.channelID = 0;
-  if (channel_connect(&g_ps.scMain) != PS_STATUS_OK)
+  if (channel_connect(&g_ps.channels[0]) != PS_STATUS_OK)
   {
     PS_LOG_ERROR("channel connect failed");
     goto err_connect;
@@ -169,8 +184,9 @@ err_host:
 
 void purespice_disconnect()
 {
-  channel_disconnect(&g_ps.scInputs);
-  channel_disconnect(&g_ps.scMain  );
+  for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+    channel_disconnect(&g_ps.channels[i]);
+
   close(g_ps.epollfd);
 
   if (g_ps.motionBuffer)
@@ -197,16 +213,14 @@ void purespice_disconnect()
 
 bool purespice_ready()
 {
-  return g_ps.scMain.connected &&
-         g_ps.scInputs.connected;
+  return g_ps.channels[0].connected;
 }
 
 PSStatus purespice_process(int timeout)
 {
-  #define MAX_EVENTS 4
-  static struct epoll_event events[MAX_EVENTS];
+  static struct epoll_event events[PS_CHANNEL_MAX];
 
-  int nfds = epoll_wait(g_ps.epollfd, events, MAX_EVENTS, timeout);
+  int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
   if (nfds == 0)
     return PS_STATUS_RUN;
 
@@ -228,7 +242,7 @@ PSStatus purespice_process(int timeout)
     else
       while(dataAvailable > 0)
       {
-        switch(channel->read(&dataAvailable))
+        switch(channel->read(channel, &dataAvailable))
         {
           case PS_STATUS_OK:
           case PS_STATUS_HANDLED:
@@ -255,16 +269,14 @@ PSStatus purespice_process(int timeout)
       }
   }
 
-  if (g_ps.scMain.connected || g_ps.scInputs.connected)
-    return PS_STATUS_RUN;
+  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+    if (g_ps.channels[i].connected)
+      return PS_STATUS_RUN;
 
   g_ps.sessionID = 0;
 
-  if (g_ps.scInputs.connected)
-    close(g_ps.scInputs.socket);
-
-  if (g_ps.scMain.connected)
-    close(g_ps.scMain.socket);
+  for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+    close(g_ps.channels[i].socket);
 
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;

@@ -23,10 +23,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "agent.h"
 #include "messages.h"
 
-PS_STATUS channelMain_onRead(int * dataAvailable)
+PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
 {
-  struct PSChannel *channel = &g_ps.scMain;
-
   SpiceMiniDataHeader header;
 
   PS_STATUS status;
@@ -95,57 +93,30 @@ PS_STATUS channelMain_onRead(int * dataAvailable)
     }
 
     for(int i = 0; i < msg->num_of_channels; ++i)
-    {
-      switch(msg->channels[i].type)
+      for(int n = 0; n < PS_CHANNEL_MAX; ++n)
       {
-        case SPICE_CHANNEL_INPUTS:
-          if (g_ps.scInputs.connected)
-          {
-            purespice_disconnect();
-            PS_LOG_ERROR("Server asked us to reconnect to the input channel");
-            return PS_STATUS_ERROR;
-          }
+        struct PSChannel * ch = &g_ps.channels[n];
+        if (ch->spiceType != msg->channels[i].type)
+          continue;
 
-          if ((status = channel_connect(&g_ps.scInputs))
-              != PS_STATUS_OK)
-          {
-            purespice_disconnect();
-            PS_LOG_ERROR("Failed to connect to the input channel");
-            return status;
-          }
+        if (ch->connected)
+        {
+          purespice_disconnect();
+          PS_LOG_ERROR("Protocol error. The server asked us to reconnect an "
+              "already connected channel (%s)", ch->name);
+          return PS_STATUS_ERROR;
+        }
 
-          PS_LOG_INFO("Connected to the input channel");
+        if ((status = channel_connect(ch)) != PS_STATUS_OK)
+        {
+          purespice_disconnect();
+          PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+          return PS_STATUS_ERROR;
+        }
 
-          if (g_ps.scPlayback.connected)
-            return PS_STATUS_OK;
-          break;
-
-        case SPICE_CHANNEL_PLAYBACK:
-          if (!g_ps.config.playback.enable)
-            break;
-
-          if (g_ps.scPlayback.connected)
-          {
-            purespice_disconnect();
-            PS_LOG_ERROR("Server asked us to reconnect to the playback channel");
-            return PS_STATUS_ERROR;
-          }
-
-          if ((status = channel_connect(&g_ps.scPlayback))
-              != PS_STATUS_OK)
-          {
-            purespice_disconnect();
-            PS_LOG_ERROR("Failed to connect to the playback channel");
-            return status;
-          }
-
-          PS_LOG_INFO("Connected to the playback channel");
-
-          if (g_ps.scInputs.connected)
-            return PS_STATUS_OK;
-          break;
+        PS_LOG_INFO("%s channel connected", ch->name);
+        break;
       }
-    }
 
     return PS_STATUS_OK;
   }

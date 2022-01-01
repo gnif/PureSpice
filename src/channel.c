@@ -50,7 +50,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
 
-  if (channel == &g_ps.scInputs)
+  if (channel->spiceType == SPICE_CHANNEL_INPUTS)
     SPICE_LOCK_INIT(g_ps.mouse.lock);
 
   SPICE_LOCK_INIT(channel->lock);
@@ -117,7 +117,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
     },
     .message = {
       .connection_id    = g_ps.sessionID,
-      .channel_type     = channel->channelType,
+      .channel_type     = channel->spiceType,
       .channel_id       = g_ps.channelID,
       .num_common_caps  = COMMON_CAPS_BYTES / sizeof(uint32_t),
       .num_channel_caps = MAIN_CAPS_BYTES   / sizeof(uint32_t),
@@ -129,10 +129,10 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
-  if (channel == &g_ps.scMain)
+  if (channel->spiceType == SPICE_CHANNEL_MAIN)
     MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
 
-  if (channel == &g_ps.scPlayback)
+  if (channel->spiceType == SPICE_CHANNEL_PLAYBACK)
     PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
 
   if (channel_writeNL(channel, &p, sizeof(p)) != sizeof(p))

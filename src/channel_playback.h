@@ -19,4 +19,5 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "ps.h"
 
-PS_STATUS channelPlayback_onRead(int * dataAvailable);
+PS_STATUS channelPlayback_onRead(struct PSChannel * channel,
+    int * dataAvailable);
