@@ -239,35 +239,39 @@ PSStatus purespice_process(int timeout)
     ioctl(channel->socket, FIONREAD, &dataAvailable);
 
     if (!dataAvailable)
+    {
       channel->connected = false;
-    else
-      while(dataAvailable > 0)
+      continue;
+    }
+
+    do
+    {
+      switch(channel->read(channel, &dataAvailable))
       {
-        switch(channel->read(channel, &dataAvailable))
-        {
-          case PS_STATUS_OK:
-          case PS_STATUS_HANDLED:
-            // if dataAvailable has gone negative then refresh it
-            if (dataAvailable < 0)
-              ioctl(channel->socket, FIONREAD, &dataAvailable);
-            break;
+        case PS_STATUS_OK:
+        case PS_STATUS_HANDLED:
+          // if dataAvailable has gone negative then refresh it
+          if (dataAvailable < 0)
+            ioctl(channel->socket, FIONREAD, &dataAvailable);
+          break;
 
-          case PS_STATUS_NODATA:
-            channel->connected = false;
-            close(channel->socket);
-            dataAvailable = 0;
-            break;
+        case PS_STATUS_NODATA:
+          channel->connected = false;
+          close(channel->socket);
+          dataAvailable = 0;
+          break;
 
-          default:
-            return PS_STATUS_ERR_READ;
-        }
-
-        if (channel->connected && !channel_ack(channel))
-        {
-          PS_LOG_ERROR("Failed to send message ack");
-          return PS_STATUS_ERR_ACK;
-        }
+        default:
+          return PS_STATUS_ERR_READ;
       }
+
+      if (channel->connected && !channel_ack(channel))
+      {
+        PS_LOG_ERROR("Failed to send message ack");
+        return PS_STATUS_ERR_ACK;
+      }
+    }
+    while(dataAvailable > 0);
   }
 
   for(int i = 0; i < PS_CHANNEL_MAX; ++i)
