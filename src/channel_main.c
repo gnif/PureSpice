@@ -118,6 +118,7 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
         break;
       }
 
+    g_ps.channelsReady = true;
     return PS_STATUS_OK;
   }
 

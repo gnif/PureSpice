@@ -184,6 +184,7 @@ err_host:
 
 void purespice_disconnect()
 {
+  g_ps.channelsReady = false;
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     channel_disconnect(&g_ps.channels[i]);
 
@@ -213,7 +214,7 @@ void purespice_disconnect()
 
 bool purespice_ready()
 {
-  return g_ps.channels[0].connected;
+  return g_ps.channelsReady;
 }
 
 PSStatus purespice_process(int timeout)
