@@ -62,6 +62,7 @@ struct PS g_ps =
     {
       .spiceType = SPICE_CHANNEL_PLAYBACK,
       .name      = "PLAYBACK",
+      .enable    = &g_ps.config.playback.enable,
       .read      = channelPlayback_onRead
     }
   }
@@ -118,6 +119,12 @@ bool purespice_connect(const PSConfig * config)
     if (!g_ps.config.playback.start)
     {
       PS_LOG_ERROR("playback->start is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.playback.stop)
+    {
+      PS_LOG_ERROR("playback->stop is mandatory");
       goto err_config;
     }
 

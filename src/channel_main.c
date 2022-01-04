@@ -96,7 +96,8 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
       for(int n = 0; n < PS_CHANNEL_MAX; ++n)
       {
         struct PSChannel * ch = &g_ps.channels[n];
-        if (ch->spiceType != msg->channels[i].type)
+        if (ch->spiceType != msg->channels[i].type ||
+            (ch->enable && !*ch->enable))
           continue;
 
         if (ch->connected)

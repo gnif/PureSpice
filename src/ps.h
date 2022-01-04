@@ -127,6 +127,7 @@ struct PSChannel
 {
   uint8_t      spiceType;
   const char * name;
+  bool       * enable;
 
   PS_STATUS (*read)(struct PSChannel * channel, int * dataAvailable);
 
