@@ -135,6 +135,9 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   if (channel->spiceType == SPICE_CHANNEL_PLAYBACK)
     PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
 
+  if (channel->spiceType == SPICE_CHANNEL_RECORD)
+    PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_RECORD_CAP_VOLUME);
+
   if (channel_writeNL(channel, &p, sizeof(p)) != sizeof(p))
   {
     channel_disconnect(channel);

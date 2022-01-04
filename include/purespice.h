@@ -112,6 +112,25 @@ typedef struct PSConfig
     void (*data)(uint8_t * data, size_t size);
   }
   playback;
+
+  struct
+  {
+    /* enable the playback channel if available */
+    bool enable;
+
+    /* called with the details of the stream to open */
+    void (*start)(int channels, int sampleRate, PSAudioFormat format);
+
+    /* [optional] called with the volume of each channel to set */
+    void (*volume)(int channels, const uint16_t volume[]);
+
+    /* [optional] called to mute/unmute the stream */
+    void (*mute)(bool mute);
+
+    /* called when the guest stops the audio stream */
+    void (*stop)(void);
+  }
+  record;
 }
 PSConfig;
 
@@ -139,6 +158,8 @@ bool purespice_clipboardRelease();
 
 bool purespice_clipboardDataStart(PSDataType type, size_t size);
 bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size);
+
+bool purespice_writeAudio(void * data, size_t size, uint32_t time);
 
 #ifdef __cplusplus
 }

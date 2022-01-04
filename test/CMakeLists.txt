@@ -23,4 +23,5 @@ add_executable(${TARGET_NAME} ${SOURCES})
 target_link_libraries(${TARGET_NAME}
 	adl
 	purespice
+	m
 )

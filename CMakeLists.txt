@@ -20,6 +20,7 @@ add_library(purespice STATIC
 	src/channel_main.c
 	src/channel_inputs.c
 	src/channel_playback.c
+	src/channel_record.c
 	src/agent.c
 )
 

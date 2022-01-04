@@ -21,8 +21,16 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <purespice.h>
+
+bool       record = false;
+int        recordChannels;
+int        recordSampleRate;
+double     recordVolume[2];
+int16_t  * recordAudio;
+int        recordAudioSize;
 
 static void clipboard_notice(const PSDataType type)
 {
@@ -58,7 +66,7 @@ static void playback_volume(int channels, const uint16_t volume[])
   printf("playback_volume(ch: %d ", channels);
   for(int i = 0; i < channels; ++i)
     printf(", %d: %u", i, volume[i]);
-  puts(")\n");
+  puts(")");
 }
 
 static void playback_mute(bool mute)
@@ -74,6 +82,64 @@ static void playback_stop(void)
 static void playback_data(uint8_t * data, size_t size)
 {
   printf("playback_data(%p, %lu)\n", data, size);
+}
+
+static void genSine()
+{
+  if (recordAudio)
+    free(recordAudio);
+
+  #define FREQ 200
+
+  recordAudioSize = recordSampleRate * sizeof(*recordAudio) * recordChannels;
+  recordAudio = malloc(recordAudioSize);
+
+  const double delta = 2.0 * M_PI * FREQ/(double)recordSampleRate;
+  double acc = 0.0;
+  for(int i = 0; i < recordSampleRate; ++i, acc += delta)
+  {
+    for(int c = 0; c < recordChannels; ++c)
+    {
+      double v = recordVolume[c] * sin(acc) * 32768.0;
+      if (v < -32768) v = 32768;
+      else if (v > 32767) v = 32767;
+      recordAudio[i * recordChannels + c] = (int16_t)v;
+    }
+  }
+}
+
+static void record_start(int channels, int sampleRate, PSAudioFormat format)
+{
+  printf("record_start(ch: %d, sampleRate: %d, format: %d)\n",
+      channels, sampleRate, format);
+  record           = true;
+  recordChannels   = channels;
+  recordSampleRate = sampleRate;
+  genSine();
+}
+
+static void record_volume(int channels, const uint16_t volume[])
+{
+  printf("record_volume(ch: %d ", channels);
+  for(int i = 0; i < channels; ++i)
+  {
+    printf(", %d: %u", i, volume[i]);
+    recordVolume[i] = 9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787;
+  }
+  puts(")");
+  genSine();
+}
+
+static void record_mute(bool mute)
+{
+  printf("record_mute(%d)\n", mute);
+  record = !mute;
+}
+
+static void record_stop(void)
+{
+  printf("record_stop\n");
+  record = false;
 }
 
 int main(int argc, char * argv[])
@@ -134,6 +200,13 @@ int main(int argc, char * argv[])
       .mute   = playback_mute,
       .stop   = playback_stop,
       .data   = playback_data
+    },
+    .record = {
+      .enable = true,
+      .start  = record_start,
+      .mute   = record_mute,
+      .volume = record_volume,
+      .stop   = record_stop
     }
   };
 
@@ -184,6 +257,9 @@ int main(int argc, char * argv[])
       case ADL_EVENT_NONE:
         if (purespice_process(1) != PS_STATUS_RUN)
           goto err_shutdown;
+
+        if (record)
+          purespice_writeAudio((uint8_t*)recordAudio, recordAudioSize, 0);
         continue;
 
       case ADL_EVENT_CLOSE:

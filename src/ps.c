@@ -26,6 +26,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "channel_main.h"
 #include "channel_inputs.h"
 #include "channel_playback.h"
+#include "channel_record.h"
 
 #include "messages.h"
 #include "rsa.h"
@@ -64,6 +65,13 @@ struct PS g_ps =
       .name      = "PLAYBACK",
       .enable    = &g_ps.config.playback.enable,
       .read      = channelPlayback_onRead
+    },
+    // PS_CHANNEL_RECORD
+    {
+      .spiceType = SPICE_CHANNEL_RECORD,
+      .name      = "RECORD",
+      .enable    = &g_ps.config.record.enable,
+      .read      = channelRecord_onRead
     }
   }
 };
@@ -131,6 +139,21 @@ bool purespice_connect(const PSConfig * config)
     if (!g_ps.config.playback.data)
     {
       PS_LOG_ERROR("playback->data is mandatory");
+      goto err_config;
+    }
+  }
+
+  if (g_ps.config.record.enable)
+  {
+    if (!g_ps.config.record.start)
+    {
+      PS_LOG_ERROR("record->start is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.record.stop)
+    {
+      PS_LOG_ERROR("record->stop is mandatory");
       goto err_config;
     }
   }
