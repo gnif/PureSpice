@@ -200,9 +200,18 @@ SpiceMsgcRecordMode;
 #define MAIN_SET_CAPABILITY(caps, index) \
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
 
+#define INPUT_CAPS_BYTES (((SPICE_INPUTS_CAP_KEY_SCANCODE + 32) / 8) & ~3)
+#define INPUT_SET_CAPABILITY(caps, index) \
+    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
 #define PLAYBACK_CAPS_BYTES (((SPICE_PLAYBACK_CAP_OPUS + 32) / 8) & ~3)
 #define PLAYBACK_SET_CAPABILITY(caps, index) \
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
+#define RECORD_CAPS_BYTES (((SPICE_RECORD_CAP_OPUS + 32) / 8) & ~3)
+#define RECORD_SET_CAPABILITY(caps, index) \
+    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
 
 #pragma pack(pop)
 

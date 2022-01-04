@@ -49,29 +49,33 @@ struct PS g_ps =
   {
     // PS_CHANNEL_MAIN
     {
-      .spiceType = SPICE_CHANNEL_MAIN,
-      .name      = "MAIN",
-      .read      = channelMain_onRead,
+      .spiceType        = SPICE_CHANNEL_MAIN,
+      .name             = "MAIN",
+      .getConnectPacket = channelMain_getConnectPacket,
+      .read             = channelMain_onRead
     },
     // PS_CHANNEL_INPUTS
     {
-      .spiceType = SPICE_CHANNEL_INPUTS,
-      .name      = "INPUTS",
-      .read      = channelInputs_onRead,
+      .spiceType        = SPICE_CHANNEL_INPUTS,
+      .name             = "INPUTS",
+      .getConnectPacket = channelInputs_getConnectPacket,
+      .read             = channelInputs_onRead,
     },
     // PS_CHANNEL_PLAYBACK
     {
-      .spiceType = SPICE_CHANNEL_PLAYBACK,
-      .name      = "PLAYBACK",
-      .enable    = &g_ps.config.playback.enable,
-      .read      = channelPlayback_onRead
+      .spiceType        = SPICE_CHANNEL_PLAYBACK,
+      .name             = "PLAYBACK",
+      .enable           = &g_ps.config.playback.enable,
+      .getConnectPacket = channelPlayback_getConnectPacket,
+      .read             = channelPlayback_onRead
     },
     // PS_CHANNEL_RECORD
     {
-      .spiceType = SPICE_CHANNEL_RECORD,
-      .name      = "RECORD",
-      .enable    = &g_ps.config.record.enable,
-      .read      = channelRecord_onRead
+      .spiceType        = SPICE_CHANNEL_RECORD,
+      .name             = "RECORD",
+      .enable           = &g_ps.config.record.enable,
+      .getConnectPacket = channelRecord_getConnectPacket,
+      .read             = channelRecord_onRead
     }
   }
 };

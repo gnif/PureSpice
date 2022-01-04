@@ -130,6 +130,7 @@ struct PSChannel
   const char * name;
   bool       * enable;
 
+  const SpiceLinkHeader * (*getConnectPacket)(void);
   PS_STATUS (*read)(struct PSChannel * channel, int * dataAvailable);
 
   bool        connected;

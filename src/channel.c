@@ -98,54 +98,16 @@ PS_STATUS channel_connect(struct PSChannel * channel)
 
   channel->connected = true;
 
-  typedef struct
-  {
-    SpiceLinkHeader header;
-    SpiceLinkMess   message;
-    uint32_t        supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
-    uint32_t        channelCaps[MAIN_CAPS_BYTES   / sizeof(uint32_t)];
-  }
-  __attribute__((packed)) ConnectPacket;
-
-  ConnectPacket p =
-  {
-    .header = {
-      .magic         = SPICE_MAGIC        ,
-      .major_version = SPICE_VERSION_MAJOR,
-      .minor_version = SPICE_VERSION_MINOR,
-      .size          = sizeof(ConnectPacket) - sizeof(SpiceLinkHeader)
-    },
-    .message = {
-      .connection_id    = g_ps.sessionID,
-      .channel_type     = channel->spiceType,
-      .channel_id       = g_ps.channelID,
-      .num_common_caps  = COMMON_CAPS_BYTES / sizeof(uint32_t),
-      .num_channel_caps = MAIN_CAPS_BYTES   / sizeof(uint32_t),
-      .caps_offset      = sizeof(SpiceLinkMess)
-    }
-  };
-
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
-
-  if (channel->spiceType == SPICE_CHANNEL_MAIN)
-    MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
-
-  if (channel->spiceType == SPICE_CHANNEL_PLAYBACK)
-    PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
-
-  if (channel->spiceType == SPICE_CHANNEL_RECORD)
-    PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_RECORD_CAP_VOLUME);
-
-  if (channel_writeNL(channel, &p, sizeof(p)) != sizeof(p))
+  const SpiceLinkHeader * p = channel->getConnectPacket();
+  if (channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
 
-  if ((status = channel_readNL(channel, &p.header, sizeof(p.header),
+  SpiceLinkHeader header;
+  if ((status = channel_readNL(channel, &header, sizeof(header),
           NULL)) != PS_STATUS_OK)
   {
     channel_disconnect(channel);
@@ -153,15 +115,15 @@ PS_STATUS channel_connect(struct PSChannel * channel)
     return status;
   }
 
-  if (p.header.magic         != SPICE_MAGIC ||
-      p.header.major_version != SPICE_VERSION_MAJOR)
+  if (header.magic         != SPICE_MAGIC ||
+      header.major_version != SPICE_VERSION_MAJOR)
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
-  if (p.header.size < sizeof(SpiceLinkReply))
+  if (header.size < sizeof(SpiceLinkReply))
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
