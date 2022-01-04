@@ -60,7 +60,8 @@ const SpiceLinkHeader * channelRecord_getConnectPacket(void)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
-  RECORD_SET_CAPABILITY(p.channelCaps, SPICE_RECORD_CAP_VOLUME);
+  if (g_ps.config.record.volume || g_ps.config.record.mute)
+    RECORD_SET_CAPABILITY(p.channelCaps, SPICE_RECORD_CAP_VOLUME);
 
   return &p.header;
 }

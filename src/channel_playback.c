@@ -60,7 +60,8 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
-  PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
+  if (g_ps.config.playback.volume || g_ps.config.playback.mute)
+    PLAYBACK_SET_CAPABILITY(p.channelCaps, SPICE_PLAYBACK_CAP_VOLUME);
 
   return &p.header;
 }
