@@ -56,6 +56,9 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
   p.message.connection_id = g_ps.sessionID;
   p.message.channel_id    = g_ps.channelID;
 
+  memset(p.supportCaps, 0, sizeof(p.supportCaps));
+  memset(p.channelCaps, 0, sizeof(p.channelCaps));
+
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
