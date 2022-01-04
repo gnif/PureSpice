@@ -46,7 +46,7 @@ PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
       if ((status = channel_readNL(channel, &in, sizeof(in),
               dataAvailable)) != PS_STATUS_OK)
       {
-        PS_LOG_ERROR("Failed to read SpiceMsgPlaybackStart");
+        PS_LOG_ERROR("Failed to read SpiceMsgRecordStart");
         return status;
       }
 
