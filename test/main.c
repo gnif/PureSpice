@@ -25,6 +25,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <purespice.h>
 
+bool       connectionReady = false;
 bool       record = false;
 int        recordChannels;
 int        recordSampleRate;
@@ -142,6 +143,12 @@ static void record_stop(void)
   record = false;
 }
 
+static void connection_ready(void)
+{
+  printf("ready\n");
+  connectionReady = true;
+}
+
 int main(int argc, char * argv[])
 {
   char * host;
@@ -184,6 +191,7 @@ int main(int argc, char * argv[])
     .host      = host,
     .port      = port,
     .password  = "",
+    .ready     = connection_ready,
     .clipboard =
     {
       .enable  = true,
@@ -218,7 +226,7 @@ int main(int argc, char * argv[])
   }
 
   /* wait for purespice to be ready */
-  while(!purespice_ready())
+  while(!connectionReady)
     if (purespice_process(1) != PS_STATUS_RUN)
     {
       retval = -1;

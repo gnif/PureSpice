@@ -52,6 +52,7 @@ struct PS g_ps =
       .spiceType        = SPICE_CHANNEL_MAIN,
       .name             = "MAIN",
       .getConnectPacket = channelMain_getConnectPacket,
+      .setCaps          = channelMain_setCaps,
       .read             = channelMain_onRead
     },
     // PS_CHANNEL_INPUTS
@@ -218,7 +219,6 @@ err_host:
 
 void purespice_disconnect()
 {
-  g_ps.channelsReady = false;
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     channel_disconnect(&g_ps.channels[i]);
 
@@ -242,13 +242,14 @@ void purespice_disconnect()
     g_ps.config.password = NULL;
   }
 
+  if (g_ps.guestName)
+  {
+    free(g_ps.guestName);
+    g_ps.guestName = NULL;
+  }
+
   agent_disconnect();
   PS_LOG_INFO("Disconnected");
-}
-
-bool purespice_ready()
-{
-  return g_ps.channelsReady;
 }
 
 PSStatus purespice_process(int timeout)
@@ -319,4 +320,24 @@ PSStatus purespice_process(int timeout)
 
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
+}
+
+bool purespice_getServerInfo(PSServerInfo * info)
+{
+  if (!g_ps.guestName)
+    return false;
+
+  memcpy(info->uuid, g_ps.guestUUID, sizeof(g_ps.guestUUID));
+  info->name = strdup(g_ps.guestName);
+
+  return true;
+}
+
+void purespice_freeServerInfo(PSServerInfo * info)
+{
+  if (!info)
+    return;
+
+  if (info->name)
+    free(info->name);
 }

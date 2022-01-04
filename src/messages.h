@@ -51,6 +51,19 @@ typedef struct SpiceChannelID
 }
 SpiceChannelID;
 
+typedef struct SpiceMsgMainName
+{
+  uint32_t name_len;
+  uint8_t  name[]; //name_len
+}
+SpiceMsgMainName;
+
+typedef struct SpiceMsgMainUUID
+{
+  uint8_t uuid[16];
+}
+SpiceMsgMainUUID;
+
 typedef struct SpiceMsgMainChannelsList
 {
   uint32_t       num_of_channels;
@@ -192,26 +205,27 @@ SpiceMsgcRecordMode;
 
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
-#define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)
-#define COMMON_SET_CAPABILITY(caps, index) \
+
+#define HAS_CAPABILITY(caps, caps_size, index) \
+  ((index) < (caps_size * 32) && ((caps)[(index) / 32] & (1 << ((index) % 32))))
+
+#define _SET_CAPABILITY(caps, index) \
     { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+
+#define COMMON_CAPS_BYTES (((SPICE_COMMON_CAP_MINI_HEADER + 32) / 8) & ~3)
+#define COMMON_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #define MAIN_CAPS_BYTES (((SPICE_MAIN_CAP_SEAMLESS_MIGRATE + 32) / 8) & ~3)
-#define MAIN_SET_CAPABILITY(caps, index) \
-    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+#define MAIN_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #define INPUT_CAPS_BYTES (((SPICE_INPUTS_CAP_KEY_SCANCODE + 32) / 8) & ~3)
-#define INPUT_SET_CAPABILITY(caps, index) \
-    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+#define INPUT_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #define PLAYBACK_CAPS_BYTES (((SPICE_PLAYBACK_CAP_OPUS + 32) / 8) & ~3)
-#define PLAYBACK_SET_CAPABILITY(caps, index) \
-    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
+#define PLAYBACK_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #define RECORD_CAPS_BYTES (((SPICE_RECORD_CAP_OPUS + 32) / 8) & ~3)
-#define RECORD_SET_CAPABILITY(caps, index) \
-    { (caps)[(index) / 32] |= (1 << ((index) % 32)); }
-
+#define RECORD_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #pragma pack(pop)
 

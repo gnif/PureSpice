@@ -52,11 +52,21 @@ typedef enum PSAudioFormat
 }
 PSAudioFormat;
 
+typedef struct PSServerInfo
+{
+  char  * name;
+  uint8_t uuid[16];
+}
+PSServerInfo;
+
 typedef struct PSConfig
 {
   const char * host;
   unsigned     port;
   const char * password;
+
+  /* [optional] called once the connection is ready (all channels connected) */
+  void (*ready)(void);
 
   struct
   {
@@ -141,7 +151,9 @@ extern "C" {
 bool purespice_connect(const struct PSConfig * config);
 void purespice_disconnect();
 PSStatus purespice_process(int timeout);
-bool purespice_ready();
+
+bool purespice_getServerInfo(PSServerInfo * info);
+void purespice_freeServerInfo(PSServerInfo * info);
 
 bool purespice_keyDown      (uint32_t code);
 bool purespice_keyUp        (uint32_t code);

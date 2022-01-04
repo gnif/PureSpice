@@ -131,6 +131,9 @@ struct PSChannel
   bool       * enable;
 
   const SpiceLinkHeader * (*getConnectPacket)(void);
+  void (*setCaps)(
+      const uint32_t * common , int numCommon,
+      const uint32_t * channel, int numChannel);
   PS_STATUS (*read)(struct PSChannel * channel, int * dataAvailable);
 
   bool        connected;
@@ -158,6 +161,8 @@ struct PS
 
   uint32_t sessionID;
   uint32_t channelID;
+  char   * guestName;
+  uint8_t  guestUUID[16];
 
   int    epollfd;
   struct PSChannel channels[PS_CHANNEL_MAX];

@@ -23,6 +23,20 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "agent.h"
 #include "messages.h"
 
+#include <stdlib.h>
+
+struct ChannelMain
+{
+  bool ready;
+
+  bool capAgentTokens;
+  bool capNameAndUUID;
+  bool hasName;
+  bool hasUUID;
+};
+
+static struct ChannelMain cm = { 0 };
+
 const SpiceLinkHeader * channelMain_getConnectPacket(void)
 {
   typedef struct
@@ -61,8 +75,46 @@ const SpiceLinkHeader * channelMain_getConnectPacket(void)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
   MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
+  MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_NAME_AND_UUID         );
+
+  memset(&cm, 0, sizeof(cm));
 
   return &p.header;
+}
+
+void channelMain_setCaps(const uint32_t * common, int numCommon,
+    const uint32_t * channel, int numChannel)
+{
+  /* for whatever reason the spice server does not report that it supports these
+   * capabilities so we are just going to assume it does until the below PR is
+   * merged, or indefiniately if it's rejected.
+   * https://gitlab.freedesktop.org/spice/spice/-/merge_requests/198
+   */
+#if 0
+  cm.capAgentTokens = HAS_CAPABILITY(channel, numChannel,
+      SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
+  cm.capNameAndUUID = HAS_CAPABILITY(channel, numChannel,
+      SPICE_MAIN_CAP_NAME_AND_UUID);
+#else
+  cm.capAgentTokens = true;
+  cm.capNameAndUUID = true;
+#endif
+}
+
+static void checkReady(void)
+{
+  if (cm.ready)
+    return;
+
+  if (cm.capNameAndUUID)
+  {
+    if (!cm.hasName || !cm.hasUUID)
+      return;
+  }
+
+  cm.ready = true;
+  if (g_ps.config.ready)
+    g_ps.config.ready();
 }
 
 PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
@@ -123,6 +175,56 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
     return PS_STATUS_OK;
   }
 
+  if (header.type == SPICE_MSG_MAIN_NAME)
+  {
+    SpiceMsgMainName *msg = (SpiceMsgMainName*)alloca(header.size);
+    if ((status = channel_readNL(channel, msg, header.size,
+            dataAvailable)) != PS_STATUS_OK)
+    {
+      purespice_disconnect();
+      PS_LOG_ERROR("Failed to read SpiceMsgMainName");
+      return status;
+    }
+
+    PS_LOG_INFO("Guest name: %s", msg->name);
+
+    if (g_ps.guestName)
+      free(g_ps.guestName);
+
+    g_ps.guestName = strdup((char *)msg->name);
+    cm.hasName = true;
+
+    checkReady();
+    return PS_STATUS_OK;
+  }
+
+  if (header.type == SPICE_MSG_MAIN_UUID)
+  {
+    SpiceMsgMainUUID msg;
+    if ((status = channel_readNL(channel, &msg, sizeof(msg),
+            dataAvailable)) != PS_STATUS_OK)
+    {
+      purespice_disconnect();
+      PS_LOG_ERROR("Failed to read SpiceMsgMainUUID");
+      return status;
+    }
+
+    PS_LOG_INFO("Guest UUID: "
+        "%08x-%04x-%04x-%04x-%02x%02x%02x%02x%02x%02x",
+        *(uint32_t*)&msg.uuid[0],
+        *(uint16_t*)&msg.uuid[4],
+        *(uint16_t*)&msg.uuid[6],
+        *(uint16_t*)&msg.uuid[8],
+        msg.uuid[10], msg.uuid[11], msg.uuid[12],
+        msg.uuid[13], msg.uuid[14], msg.uuid[15]);
+
+    memcpy(g_ps.guestUUID, msg.uuid, sizeof(g_ps.guestUUID));
+    cm.hasUUID = true;
+
+    checkReady();
+    return PS_STATUS_OK;
+  }
+
   if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
   {
     SpiceMainChannelsList *msg = (SpiceMainChannelsList*)alloca(header.size);
@@ -161,7 +263,7 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
         break;
       }
 
-    g_ps.channelsReady = true;
+    checkReady();
     return PS_STATUS_OK;
   }
 

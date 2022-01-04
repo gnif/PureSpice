@@ -130,32 +130,30 @@ PS_STATUS channel_connect(struct PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
-  SpiceLinkReply reply;
-  if ((status = channel_readNL(channel, &reply, sizeof(reply),
+  SpiceLinkReply * reply = alloca(header.size);
+  if ((status = channel_readNL(channel, reply, header.size,
           NULL)) != PS_STATUS_OK)
   {
     channel_disconnect(channel);
     return status;
   }
 
-  if (reply.error != SPICE_LINK_ERR_OK)
+  if (reply->error != SPICE_LINK_ERR_OK)
   {
     channel_disconnect(channel);
-    PS_LOG_ERROR("Server reported link error: %d", reply.error);
+    PS_LOG_ERROR("Server reported link error: %d", reply->error);
     return PS_STATUS_ERROR;
   }
 
-  uint32_t capsCommon [reply.num_common_caps ];
-  uint32_t capsChannel[reply.num_channel_caps];
-  if ((status = channel_readNL(channel,
-          &capsCommon , sizeof(capsCommon ), NULL)) != PS_STATUS_OK ||
-      (status = channel_readNL(channel,
-          &capsChannel, sizeof(capsChannel), NULL)) != PS_STATUS_OK)
-  {
-    channel_disconnect(channel);
-    PS_LOG_ERROR("Failed to read the channel capabillities");
-    return status;
-  }
+  const uint32_t * capsCommon =
+    (uint32_t *)((uint8_t *)reply + reply->caps_offset);
+  const uint32_t * capsChannel =
+    capsCommon + reply->num_common_caps;
+
+  if (channel->setCaps)
+    channel->setCaps(
+      capsCommon , reply->num_common_caps,
+      capsChannel, reply->num_channel_caps);
 
   SpiceLinkAuthMechanism auth;
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
@@ -167,7 +165,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   }
 
   PSPassword pass;
-  if (!rsa_encryptPassword(reply.pub_key, g_ps.config.password, &pass))
+  if (!rsa_encryptPassword(reply->pub_key, g_ps.config.password, &pass))
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("Failed to encrypt the password");
