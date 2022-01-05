@@ -210,13 +210,11 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
     }
 
     PS_LOG_INFO("Guest UUID: "
-        "%08x-%04x-%04x-%04x-%02x%02x%02x%02x%02x%02x",
-        *(uint32_t*)&msg.uuid[0],
-        *(uint16_t*)&msg.uuid[4],
-        *(uint16_t*)&msg.uuid[6],
-        *(uint16_t*)&msg.uuid[8],
-        msg.uuid[10], msg.uuid[11], msg.uuid[12],
-        msg.uuid[13], msg.uuid[14], msg.uuid[15]);
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        msg.uuid[ 0], msg.uuid[ 1], msg.uuid[ 2], msg.uuid[ 3], msg.uuid[ 4],
+        msg.uuid[ 5], msg.uuid[ 6], msg.uuid[ 7], msg.uuid[ 8], msg.uuid[ 9],
+        msg.uuid[10], msg.uuid[11], msg.uuid[12], msg.uuid[13], msg.uuid[14],
+        msg.uuid[15]);
 
     memcpy(g_ps.guestUUID, msg.uuid, sizeof(g_ps.guestUUID));
     cm.hasUUID = true;
