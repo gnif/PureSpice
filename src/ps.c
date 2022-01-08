@@ -200,6 +200,7 @@ bool purespice_connect(const PSConfig * config)
   }
 
   PS_LOG_INFO("Connected");
+  g_ps.connected = true;
   return true;
 
 err_connect:
@@ -219,6 +220,8 @@ err_host:
 
 void purespice_disconnect()
 {
+  g_ps.connected = false;
+
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     channel_disconnect(&g_ps.channels[i]);
 
@@ -262,6 +265,12 @@ PSStatus purespice_process(int timeout)
 
   if (nfds < 0)
   {
+    if (!g_ps.connected)
+    {
+      PS_LOG_INFO("Shutdown");
+      return PS_STATUS_SHUTDOWN;
+    }
+
     PS_LOG_ERROR("epoll_err returned %d", nfds);
     return PS_STATUS_ERR_POLL;
   }

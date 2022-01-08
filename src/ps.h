@@ -164,6 +164,7 @@ struct PS
   char   * guestName;
   uint8_t  guestUUID[16];
 
+  bool   connected;
   int    epollfd;
   struct PSChannel channels[PS_CHANNEL_MAX];
   bool   channelsReady;
