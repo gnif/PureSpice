@@ -212,7 +212,7 @@ err_config:
 
 err_password:
   free((char *)g_ps.config.password);
-  g_ps.config.host = NULL;
+  g_ps.config.password = NULL;
 
 err_host:
   return false;
