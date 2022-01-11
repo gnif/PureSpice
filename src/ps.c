@@ -233,6 +233,12 @@ err_host:
 
 void purespice_disconnect()
 {
+  if (!g_ps.initialized)
+  {
+    log_init();
+    g_ps.initialized = true;
+  }
+
   g_ps.connected = false;
 
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
