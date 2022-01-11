@@ -26,9 +26,9 @@ Place, Suite 330, Boston, MA 02111-1307 USA
   func(__FILE__, __LINE__, __FUNCTION__, fmt, ##__VA_ARGS__); \
 } while(0);
 
-#define PS_LOG_INFO(fmt, ...)  _PS_LOG(g_ps.config.log.info , fmt, ##__VA_ARGS__)
-#define PS_LOG_WARN(fmt, ...)  _PS_LOG(g_ps.config.log.warn , fmt, ##__VA_ARGS__)
-#define PS_LOG_ERROR(fmt, ...) _PS_LOG(g_ps.config.log.error, fmt, ##__VA_ARGS__)
+#define PS_LOG_INFO(fmt, ...)  _PS_LOG(g_ps.init.log.info , fmt, ##__VA_ARGS__)
+#define PS_LOG_WARN(fmt, ...)  _PS_LOG(g_ps.init.log.warn , fmt, ##__VA_ARGS__)
+#define PS_LOG_ERROR(fmt, ...) _PS_LOG(g_ps.init.log.error, fmt, ##__VA_ARGS__)
 
 #define PS_LOG_INFO_ONCE(fmt, ...) do { \
   static char first = 1; \

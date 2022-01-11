@@ -147,6 +147,8 @@ struct PSChannel
 
 struct PS
 {
+  bool     initialized;
+  PSInit   init;
   PSConfig config;
 
   short        family;

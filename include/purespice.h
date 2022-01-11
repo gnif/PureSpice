@@ -59,15 +59,8 @@ typedef struct PSServerInfo
 }
 PSServerInfo;
 
-typedef struct PSConfig
+typedef struct PSInit
 {
-  const char * host;
-  unsigned     port;
-  const char * password;
-
-  /* [optional] called once the connection is ready (all channels connected) */
-  void (*ready)(void);
-
   struct
   {
     void (*info)(const char * file, unsigned int line, const char * function,
@@ -80,6 +73,17 @@ typedef struct PSConfig
         const char * format, ...) __attribute__((format (printf, 4, 5)));
   }
   log;
+}
+PSInit;
+
+typedef struct PSConfig
+{
+  const char * host;
+  unsigned     port;
+  const char * password;
+
+  /* [optional] called once the connection is ready (all channels connected) */
+  void (*ready)(void);
 
   struct
   {
@@ -147,6 +151,15 @@ PSConfig;
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*
+ * Initialize the library for use, this may be called before any other methods
+ * to setup the library. If not initialization will be automatically performed
+ * by `purespice_connect` with default parameters.
+ *
+ * `init` is optional and may be NULL
+ */
+void purespice_init(PSInit * init);
 
 bool purespice_connect(const struct PSConfig * config);
 void purespice_disconnect();

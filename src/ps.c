@@ -81,10 +81,23 @@ struct PS g_ps =
   }
 };
 
+void purespice_init(PSInit * init)
+{
+  if (init)
+    memcpy(&g_ps.init, init, sizeof(*init));
+  log_init();
+  g_ps.initialized = true;
+}
+
 bool purespice_connect(const PSConfig * config)
 {
+  if (!g_ps.initialized)
+  {
+    log_init();
+    g_ps.initialized = true;
+  }
+
   memcpy(&g_ps.config, config, sizeof(*config));
-  log_init();
 
   g_ps.config.host = (const char *)strdup(config->host);
   if (!g_ps.config.host)

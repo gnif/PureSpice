@@ -56,14 +56,14 @@ static void log_stderr(const char * file, unsigned int line,
 
 void log_init(void)
 {
-  if (!g_ps.config.log.info)
-    g_ps.config.log.info  = log_stdout;
+  if (!g_ps.init.log.info)
+    g_ps.init.log.info  = log_stdout;
 
-  if (!g_ps.config.log.warn)
-    g_ps.config.log.warn  = log_stdout;
+  if (!g_ps.init.log.warn)
+    g_ps.init.log.warn  = log_stdout;
 
-  if (!g_ps.config.log.error)
-    g_ps.config.log.error = log_stderr;
+  if (!g_ps.init.log.error)
+    g_ps.init.log.error = log_stderr;
 }
 
 #endif
