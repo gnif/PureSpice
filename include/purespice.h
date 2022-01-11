@@ -159,9 +159,9 @@ extern "C" {
  *
  * `init` is optional and may be NULL
  */
-void purespice_init(PSInit * init);
+void purespice_init(const PSInit * init);
 
-bool purespice_connect(const struct PSConfig * config);
+bool purespice_connect(const PSConfig * config);
 void purespice_disconnect();
 PSStatus purespice_process(int timeout);
 

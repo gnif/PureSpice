@@ -81,7 +81,7 @@ struct PS g_ps =
   }
 };
 
-void purespice_init(PSInit * init)
+void purespice_init(const PSInit * init)
 {
   if (init)
     memcpy(&g_ps.init, init, sizeof(*init));
