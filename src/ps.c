@@ -239,6 +239,7 @@ void purespice_disconnect()
     g_ps.initialized = true;
   }
 
+  const bool wasConnected = g_ps.connected;
   g_ps.connected = false;
 
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
@@ -271,7 +272,9 @@ void purespice_disconnect()
   }
 
   agent_disconnect();
-  PS_LOG_INFO("Disconnected");
+
+  if (wasConnected)
+    PS_LOG_INFO("Disconnected");
 }
 
 PSStatus purespice_process(int timeout)
