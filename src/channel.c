@@ -216,6 +216,8 @@ void channel_disconnect(struct PSChannel * channel)
 
   if (channel->ready)
   {
+    channel->ready = false;
+
     /* disable nodelay so we can trigger a flush after this message */
     int flag;
     if (g_ps.family != AF_UNIX)

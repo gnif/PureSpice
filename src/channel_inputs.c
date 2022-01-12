@@ -139,7 +139,7 @@ PS_STATUS channelInputs_onRead(struct PSChannel * channel, int * dataAvailable)
 bool purespice_keyDown(uint32_t code)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   if (code > 0x100)
@@ -162,7 +162,7 @@ bool purespice_keyDown(uint32_t code)
 bool purespice_keyUp(uint32_t code)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   if (code < 0x100)
@@ -187,7 +187,7 @@ bool purespice_keyUp(uint32_t code)
 bool purespice_keyModifiers(uint32_t modifiers)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   SpiceMsgcInputsKeyModifiers * msg =
@@ -207,7 +207,7 @@ bool purespice_keyModifiers(uint32_t modifiers)
 bool purespice_mouseMode(bool server)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   SpiceMsgcMainMouseModeRequest * msg = SPICE_PACKET(
@@ -228,7 +228,7 @@ bool purespice_mouseMode(bool server)
 bool purespice_mousePosition(uint32_t x, uint32_t y)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   SpiceMsgcMousePosition * msg =
@@ -254,7 +254,7 @@ bool purespice_mousePosition(uint32_t x, uint32_t y)
 bool purespice_mouseMotion(int32_t x, int32_t y)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   /* while the protocol supports movements greater then +-127 the QEMU
@@ -340,7 +340,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
 bool purespice_mousePress(uint32_t button)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   SPICE_LOCK(g_ps.mouse.lock);
@@ -377,7 +377,7 @@ bool purespice_mousePress(uint32_t button)
 bool purespice_mouseRelease(uint32_t button)
 {
   struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
-  if (!channel->connected)
+  if (!channel->connected || !channel->ready)
     return false;
 
   SPICE_LOCK(g_ps.mouse.lock);
