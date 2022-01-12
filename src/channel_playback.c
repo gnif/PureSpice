@@ -81,6 +81,8 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
     return status;
   }
 
+  channel->initDone = true;
+
   switch(header.type)
   {
     case SPICE_MSG_PLAYBACK_START:
