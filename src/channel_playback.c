@@ -100,7 +100,7 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
         fmt = PS_AUDIO_FMT_S16;
 
       g_ps.config.playback.start(in.channels, in.frequency, fmt, in.time);
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_PLAYBACK_DATA:
@@ -115,12 +115,12 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
       }
 
       g_ps.config.playback.data(in->data, header.size - sizeof(*in));
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_PLAYBACK_STOP:
       g_ps.config.playback.stop();
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
 
     case SPICE_MSG_PLAYBACK_VOLUME:
     {
@@ -136,7 +136,7 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
       if (g_ps.config.playback.volume)
         g_ps.config.playback.volume(in->nchannels, in->volume);
 
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_PLAYBACK_MUTE:
@@ -152,7 +152,7 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
       if (g_ps.config.playback.mute)
         g_ps.config.playback.mute(in.mute);
 
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
   }
 

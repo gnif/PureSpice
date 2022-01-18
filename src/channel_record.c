@@ -100,12 +100,12 @@ PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
         fmt = PS_AUDIO_FMT_S16;
 
       g_ps.config.record.start(in.channels, in.frequency, fmt);
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_RECORD_STOP:
       g_ps.config.record.stop();
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
 
     case SPICE_MSG_RECORD_VOLUME:
     {
@@ -121,7 +121,7 @@ PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
       if (g_ps.config.record.volume)
         g_ps.config.record.volume(in->nchannels, in->volume);
 
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
 
     case SPICE_MSG_RECORD_MUTE:
@@ -137,7 +137,7 @@ PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
       if (g_ps.config.record.mute)
         g_ps.config.record.mute(in.mute);
 
-      return PS_STATUS_OK;
+      return PS_STATUS_HANDLED;
     }
   }
 
