@@ -26,8 +26,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "messages.h"
 
-#include <sys/ioctl.h>
-
 const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
 {
   typedef struct
@@ -74,7 +72,13 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
 PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable)
 {
   SpiceMiniDataHeader header;
-  static bool drain = true;
+
+  static int  l_stride  = 0;
+  static int  l_freq    = 0;
+  static bool l_drain   = true;
+  static int  l_drained = 0;
+
+  channel->initDone = true;
 
   PS_STATUS status;
   if ((status = channel_onRead(channel, &header,
@@ -85,11 +89,12 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
   }
 
   // discard data packets until we have drained any buffers in the network stack
-  if (drain && header.type == SPICE_MSG_PLAYBACK_DATA)
+  // and qemu, it is usually about 200ms, so we drain 500ms to be sure
+  if (l_drain && header.type == SPICE_MSG_PLAYBACK_DATA)
   {
-    ioctl(channel->socket, FIONREAD, dataAvailable);
-    if (*dataAvailable <= header.size)
-      drain = false;
+    l_drained += header.size / l_stride;
+    if (l_drained >= l_freq / 2)
+      l_drain = false;
     else
     {
       if ((status = channel_discardNL(channel, header.size,
@@ -98,6 +103,7 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
         PS_LOG_ERROR("Failed to discard %d bytes", header.size);
         return status;
       }
+
       return PS_STATUS_HANDLED;
     }
   }
@@ -115,17 +121,17 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
       }
 
       PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
+      int fmtSize = 8;
       if (in.format == SPICE_AUDIO_FMT_S16)
-        fmt = PS_AUDIO_FMT_S16;
+      {
+        fmtSize = 16;
+        fmt     = PS_AUDIO_FMT_S16;
+      }
+
+      l_freq   = in.frequency;
+      l_stride = in.channels * (fmtSize >> 3);
 
       g_ps.config.playback.start(in.channels, in.frequency, fmt, in.time);
-
-      // if the playback start was slow the network stack may have buffered
-      // audio frames which can increase the playback latency by several
-      // hundreds of milliseconds, so we need to drain the buffers to prevent
-      // this if it has happened.
-      drain = true;
-
       return PS_STATUS_HANDLED;
     }
 
