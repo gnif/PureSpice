@@ -26,6 +26,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "messages.h"
 
+#include <sys/ioctl.h>
+
 const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
 {
   typedef struct
@@ -72,6 +74,7 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
 PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable)
 {
   SpiceMiniDataHeader header;
+  static bool drain = true;
 
   PS_STATUS status;
   if ((status = channel_onRead(channel, &header,
@@ -81,7 +84,23 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
     return status;
   }
 
-  channel->initDone = true;
+  // discard data packets until we have drained any buffers in the network stack
+  if (drain && header.type == SPICE_MSG_PLAYBACK_DATA)
+  {
+    ioctl(channel->socket, FIONREAD, dataAvailable);
+    if (*dataAvailable <= header.size)
+      drain = false;
+    else
+    {
+      if ((status = channel_discardNL(channel, header.size,
+              dataAvailable) != PS_STATUS_OK))
+      {
+        PS_LOG_ERROR("Failed to discard %d bytes", header.size);
+        return status;
+      }
+      return PS_STATUS_HANDLED;
+    }
+  }
 
   switch(header.type)
   {
@@ -100,6 +119,13 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
         fmt = PS_AUDIO_FMT_S16;
 
       g_ps.config.playback.start(in.channels, in.frequency, fmt, in.time);
+
+      // if the playback start was slow the network stack may have buffered
+      // audio frames which can increase the playback latency by several
+      // hundreds of milliseconds, so we need to drain the buffers to prevent
+      // this if it has happened.
+      drain = true;
+
       return PS_STATUS_HANDLED;
     }
 
