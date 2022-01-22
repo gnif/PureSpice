@@ -77,7 +77,8 @@ PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
   if ((status = channel_onRead(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
   {
-    PS_LOG_ERROR("Failed to read SpiceMiniDataHeader");
+    if (status != PS_STATUS_HANDLED)
+      PS_LOG_ERROR("Failed to read SpiceMiniDataHeader");
     return status;
   }
 
