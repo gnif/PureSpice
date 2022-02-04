@@ -73,13 +73,6 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
 {
   SpiceMiniDataHeader header;
 
-  static int  l_stride  = 0;
-  static int  l_freq    = 0;
-  static bool l_drain   = true;
-  static int  l_drained = 0;
-
-  channel->initDone = true;
-
   PS_STATUS status;
   if ((status = channel_onRead(channel, &header,
           dataAvailable)) != PS_STATUS_OK)
@@ -89,25 +82,7 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
     return status;
   }
 
-  // discard data packets until we have drained any buffers in the network stack
-  // and qemu, it is usually about 200ms, so we drain 500ms to be sure
-  if (l_drain && header.type == SPICE_MSG_PLAYBACK_DATA)
-  {
-    l_drained += header.size / l_stride;
-    if (l_drained >= l_freq / 2)
-      l_drain = false;
-    else
-    {
-      if ((status = channel_discardNL(channel, header.size,
-              dataAvailable) != PS_STATUS_OK))
-      {
-        PS_LOG_ERROR("Failed to discard %d bytes", header.size);
-        return status;
-      }
-
-      return PS_STATUS_HANDLED;
-    }
-  }
+  channel->initDone = true;
 
   switch(header.type)
   {
@@ -122,15 +97,8 @@ PS_STATUS channelPlayback_onRead(struct PSChannel * channel, int * dataAvailable
       }
 
       PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
-      int fmtSize = 8;
       if (in.format == SPICE_AUDIO_FMT_S16)
-      {
-        fmtSize = 16;
-        fmt     = PS_AUDIO_FMT_S16;
-      }
-
-      l_freq   = in.frequency;
-      l_stride = in.channels * (fmtSize >> 3);
+        fmt = PS_AUDIO_FMT_S16;
 
       g_ps.config.playback.start(in.channels, in.frequency, fmt, in.time);
       return PS_STATUS_HANDLED;
