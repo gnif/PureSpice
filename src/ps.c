@@ -36,6 +36,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 
 #include <sys/ioctl.h>
 #include <sys/epoll.h>
@@ -282,7 +283,7 @@ PSStatus purespice_process(int timeout)
   static struct epoll_event events[PS_CHANNEL_MAX];
 
   int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
-  if (nfds == 0)
+  if (nfds == 0 || (nfds < 0 && errno == EINTR))
     return PS_STATUS_RUN;
 
   if (nfds < 0)
