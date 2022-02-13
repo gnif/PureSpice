@@ -99,7 +99,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   channel->connected = true;
 
   const SpiceLinkHeader * p = channel->getConnectPacket();
-  if (channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
+  if ((size_t)channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
   {
     channel_disconnect(channel);
     PS_LOG_ERROR("Failed to write the connect packet");
@@ -368,7 +368,7 @@ bool channel_ack(struct PSChannel * channel)
 }
 
 ssize_t channel_writeNL(const struct PSChannel * channel,
-    const void * buffer, const ssize_t size)
+    const void * buffer, size_t size)
 {
   if (!channel->connected)
     return -1;
@@ -380,7 +380,7 @@ ssize_t channel_writeNL(const struct PSChannel * channel,
 }
 
 PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
-    const ssize_t size, int * dataAvailable)
+    size_t size, int * dataAvailable)
 {
   if (!channel->connected)
   {
@@ -419,10 +419,10 @@ PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
 }
 
 PS_STATUS channel_discardNL(struct PSChannel * channel,
-    ssize_t size, int * dataAvailable)
+    size_t size, int * dataAvailable)
 {
   uint8_t c[1024];
-  ssize_t left = size;
+  size_t left = size;
   while(left)
   {
     ssize_t len = read(channel->socket, c, left > sizeof(c) ? sizeof(c) : left);

@@ -287,7 +287,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
     return true;
   }
 
-  const ssize_t bufferSize = (
+  const size_t bufferSize = (
     sizeof(SpiceMiniDataHeader ) +
     sizeof(SpiceMsgcMouseMotion)
   ) * msgs;
@@ -328,7 +328,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
   const ssize_t wrote = send(channel->socket, buffer, bufferSize, 0);
   SPICE_UNLOCK(channel->lock);
 
-  if (wrote != bufferSize)
+  if ((size_t)wrote != bufferSize)
   {
     PS_LOG_ERROR("Only wrote %ld of the expected %ld bytes", wrote, bufferSize);
     return false;

@@ -173,7 +173,7 @@ bool purespice_writeAudio(void * data, size_t size, uint32_t time)
   const ssize_t wrote = send(channel->socket, data, size, 0);
   SPICE_UNLOCK(channel->lock);
 
-  if (wrote != size)
+  if ((size_t)wrote != size)
   {
     PS_LOG_ERROR("Failed to write the audio data");
     return false;
