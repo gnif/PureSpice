@@ -15,6 +15,8 @@ add_compile_options(
   "-Wall"
   "-Wextra"
   "-Werror"
+  "-Wfatal-errors"
+  "-Wstrict-prototypes"
 )
 add_library(purespice STATIC
 	src/ps.c

@@ -33,7 +33,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <sys/epoll.h>
 #include <netinet/tcp.h>
 
-static uint64_t get_timestamp()
+static uint64_t get_timestamp(void)
 {
   struct timespec time;
   const int result = clock_gettime(CLOCK_MONOTONIC, &time);

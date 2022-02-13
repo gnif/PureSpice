@@ -162,7 +162,7 @@ extern "C" {
 void purespice_init(const PSInit * init);
 
 bool purespice_connect(const PSConfig * config);
-void purespice_disconnect();
+void purespice_disconnect(void);
 PSStatus purespice_process(int timeout);
 
 bool purespice_getServerInfo(PSServerInfo * info);
@@ -179,7 +179,7 @@ bool purespice_mouseRelease (uint32_t button);
 
 bool purespice_clipboardRequest(PSDataType type);
 bool purespice_clipboardGrab(PSDataType types[], int count);
-bool purespice_clipboardRelease();
+bool purespice_clipboardRelease(void);
 
 bool purespice_clipboardDataStart(PSDataType type, size_t size);
 bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size);
