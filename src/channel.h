@@ -29,10 +29,10 @@ PS_STATUS channel_onRead(struct PSChannel * channel,
 bool channel_ack(struct PSChannel * channel);
 
 ssize_t channel_writeNL(const struct PSChannel * channel,
-    const void * buffer, const ssize_t size);
+    const void * buffer, size_t size);
 
 PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
-    const ssize_t size, int * dataAvailable);
+    size_t size, int * dataAvailable);
 
 PS_STATUS channel_discardNL(struct PSChannel * channel,
-    ssize_t size, int * dataAvailable);
+    size_t size, int * dataAvailable);

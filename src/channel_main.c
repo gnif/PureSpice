@@ -96,6 +96,10 @@ void channelMain_setCaps(const uint32_t * common, int numCommon,
   cm.capNameAndUUID = HAS_CAPABILITY(channel, numChannel,
       SPICE_MAIN_CAP_NAME_AND_UUID);
 #else
+  (void) common;
+  (void) numCommon;
+  (void) channel;
+  (void) numChannel;
   cm.capAgentTokens = true;
   cm.capNameAndUUID = true;
 #endif
@@ -234,7 +238,7 @@ PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
       return status;
     }
 
-    for(int i = 0; i < msg->num_of_channels; ++i)
+    for(size_t i = 0; i < msg->num_of_channels; ++i)
       for(int n = 0; n < PS_CHANNEL_MAX; ++n)
       {
         struct PSChannel * ch = &g_ps.channels[n];

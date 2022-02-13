@@ -11,6 +11,11 @@ pkg_check_modules(SPICE_PKGCONFIG REQUIRED
 
 add_definitions(-D USE_NETTLE)
 
+add_compile_options(
+  "-Wall"
+  "-Wextra"
+  "-Werror"
+)
 add_library(purespice STATIC
 	src/ps.c
 	src/log.c

@@ -660,6 +660,8 @@ bool purespice_clipboardDataStart(PSDataType type, size_t size)
 
 bool purespice_clipboardData(PSDataType type, uint8_t * data, size_t size)
 {
+  (void) type;
+
   if (!agent.present)
     return false;
 
