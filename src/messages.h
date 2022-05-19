@@ -22,6 +22,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <stdint.h>
 #include <spice/enums.h>
+#include "draw.h"
 
 #pragma pack(push,1)
 
@@ -203,6 +204,53 @@ typedef struct SpiceMsgcPlaybackMode
 SpiceMsgPlaybackMode,
 SpiceMsgcRecordMode;
 
+typedef struct SpiceMsgcDisplayInit
+{
+  uint8_t  pixmap_cache_id;
+  int64_t  pixmap_cache_size;
+  uint8_t  glz_dictionary_id;
+  uint32_t glz_dictionary_window_size;
+}
+SpiceMsgcDisplayInit;
+
+typedef struct SpiceMsgSurfaceCreate
+{
+  uint32_t surface_id;
+  uint32_t width;
+  uint32_t height;
+  uint32_t format;
+  uint32_t flags;
+}
+SpiceMsgSurfaceCreate;
+
+typedef struct SpiceMsgSurfaceDestroy
+{
+  uint32_t surface_id;
+}
+SpiceMsgSurfaceDestroy;
+
+typedef struct SpiceMsgDisplayBase
+{
+  uint32_t surface_id;
+  SpiceRect box;
+  SpiceClip clip;
+}
+SpiceMsgDisplayBase;
+
+typedef struct SpiceMsgDisplayDrawFill
+{
+  SpiceMsgDisplayBase base;
+  SpiceFill data;
+}
+SpiceMsgDisplayDrawFill;
+
+typedef struct SpiceMsgDisplayDrawCopy
+{
+  SpiceMsgDisplayBase base;
+  SpiceCopy data;
+}
+SpiceMsgDisplayDrawCopy;
+
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
 
@@ -226,6 +274,9 @@ SpiceMsgcRecordMode;
 
 #define RECORD_CAPS_BYTES (((SPICE_RECORD_CAP_OPUS + 32) / 8) & ~3)
 #define RECORD_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
+
+#define DISPLAY_CAPS_BYTES (((SPICE_DISPLAY_CAP_CODEC_H265 + 32) / 8) & ~3)
+#define DISPLAY_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #pragma pack(pop)
 

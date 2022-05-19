@@ -23,8 +23,7 @@ PS_STATUS channel_connect   (struct PSChannel * channel);
 
 void      channel_disconnect(struct PSChannel * channel);
 
-PS_STATUS channel_onRead(struct PSChannel * channel,
-    SpiceMiniDataHeader * header, int * dataAvailable);
+PSHandlerFn channel_onMessage(struct PSChannel * channel);
 
 bool channel_ack(struct PSChannel * channel);
 

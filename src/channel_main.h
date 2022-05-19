@@ -19,7 +19,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "ps.h"
 
-PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable);
 const SpiceLinkHeader * channelMain_getConnectPacket(void);
 void channelMain_setCaps(const uint32_t * common, int numCommon,
     const uint32_t * channel, int numChannel);
+PSHandlerFn channelMain_onMessage(struct PSChannel * channel);

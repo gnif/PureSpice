@@ -121,243 +121,227 @@ static void checkReady(void)
     g_ps.config.ready();
 }
 
-PS_STATUS channelMain_onRead(struct PSChannel * channel, int * dataAvailable)
+static PS_STATUS onMessage_mainInit(struct PSChannel * channel)
 {
-  SpiceMiniDataHeader header;
+  channel->initDone = true;
 
-  PS_STATUS status;
-  if ((status = channel_onRead(channel, &header,
-          dataAvailable)) != PS_STATUS_OK)
-    return status;
+  SpiceMsgMainInit * msg = (SpiceMsgMainInit *)channel->buffer;
+  g_ps.sessionID = msg->session_id;
+  agent_setServerTokens(msg->agent_tokens);
 
-  if (!channel->initDone)
+  if (msg->agent_connected)
   {
-    if (header.type != SPICE_MSG_MAIN_INIT)
+    PS_STATUS status;
+    if ((status = agent_connect()) != PS_STATUS_OK)
     {
       purespice_disconnect();
-      PS_LOG_ERROR("Expected SPICE_MSG_MAIN_INIT but got %d", header.type);
-      return PS_STATUS_ERROR;
-    }
-
-    channel->initDone = true;
-    SpiceMsgMainInit msg;
-    if ((status = channel_readNL(channel, &msg, sizeof(msg),
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read SpiceMsgMainInit");
       return status;
     }
+  }
 
-    g_ps.sessionID = msg.session_id;
-    agent_setServerTokens(msg.agent_tokens);
+  if (msg->current_mouse_mode != SPICE_MOUSE_MODE_CLIENT &&
+      !purespice_mouseMode(false))
+  {
+    PS_LOG_ERROR("Failed to set the initial mouse mode");
+    return PS_STATUS_ERROR;
+  }
 
-    if (msg.agent_connected)
+  void * packet = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, 0, 0);
+  if (!SPICE_SEND_PACKET(channel, packet))
+  {
+    purespice_disconnect();
+    PS_LOG_ERROR("Failed to write SPICE_MSGC_MAIN_ATTACH_CHANNELS");
+    return PS_STATUS_ERROR;
+  }
+
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainName(struct PSChannel * channel)
+{
+  SpiceMsgMainName * msg = (SpiceMsgMainName *)channel->buffer;
+  PS_LOG_INFO("Guest name: %s", msg->name);
+
+  if (g_ps.guestName)
+    free(g_ps.guestName);
+
+  g_ps.guestName = strdup((char *)msg->name);
+  cm.hasName = true;
+
+  checkReady();
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainUUID(struct PSChannel * channel)
+{
+  SpiceMsgMainUUID * msg = (SpiceMsgMainUUID *)channel->buffer;
+
+  PS_LOG_INFO("Guest UUID: "
+      "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+      msg->uuid[ 0], msg->uuid[ 1], msg->uuid[ 2], msg->uuid[ 3], msg->uuid[ 4],
+      msg->uuid[ 5], msg->uuid[ 6], msg->uuid[ 7], msg->uuid[ 8], msg->uuid[ 9],
+      msg->uuid[10], msg->uuid[11], msg->uuid[12], msg->uuid[13], msg->uuid[14],
+      msg->uuid[15]);
+
+  memcpy(g_ps.guestUUID, msg->uuid, sizeof(g_ps.guestUUID));
+  cm.hasUUID = true;
+
+  checkReady();
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
+{
+  SpiceMainChannelsList * msg = (SpiceMainChannelsList *)channel->buffer;
+
+  for(size_t i = 0; i < msg->num_of_channels; ++i)
+    for(int n = 0; n < PS_CHANNEL_MAX; ++n)
     {
-      if ((status = agent_connect()) != PS_STATUS_OK)
+      struct PSChannel * ch = &g_ps.channels[n];
+      if (ch->spiceType != msg->channels[i].type ||
+          (ch->enable && !*ch->enable))
+        continue;
+
+      if (ch->connected)
       {
         purespice_disconnect();
-        return status;
+        PS_LOG_ERROR("Protocol error. The server asked us to reconnect an "
+            "already connected channel (%s)", ch->name);
+        return PS_STATUS_ERROR;
       }
-    }
 
-    if (msg.current_mouse_mode != SPICE_MOUSE_MODE_CLIENT &&
-        !purespice_mouseMode(false))
-    {
-      PS_LOG_ERROR("Failed to set the initial mouse mode");
-      return PS_STATUS_ERROR;
-    }
-
-    void * packet = SPICE_RAW_PACKET(SPICE_MSGC_MAIN_ATTACH_CHANNELS, 0, 0);
-    if (!SPICE_SEND_PACKET(channel, packet))
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to write SPICE_MSGC_MAIN_ATTACH_CHANNELS");
-      return PS_STATUS_ERROR;
-    }
-
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_NAME)
-  {
-    SpiceMsgMainName *msg = (SpiceMsgMainName*)alloca(header.size);
-    if ((status = channel_readNL(channel, msg, header.size,
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read SpiceMsgMainName");
-      return status;
-    }
-
-    PS_LOG_INFO("Guest name: %s", msg->name);
-
-    if (g_ps.guestName)
-      free(g_ps.guestName);
-
-    g_ps.guestName = strdup((char *)msg->name);
-    cm.hasName = true;
-
-    checkReady();
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_UUID)
-  {
-    SpiceMsgMainUUID msg;
-    if ((status = channel_readNL(channel, &msg, sizeof(msg),
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read SpiceMsgMainUUID");
-      return status;
-    }
-
-    PS_LOG_INFO("Guest UUID: "
-        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        msg.uuid[ 0], msg.uuid[ 1], msg.uuid[ 2], msg.uuid[ 3], msg.uuid[ 4],
-        msg.uuid[ 5], msg.uuid[ 6], msg.uuid[ 7], msg.uuid[ 8], msg.uuid[ 9],
-        msg.uuid[10], msg.uuid[11], msg.uuid[12], msg.uuid[13], msg.uuid[14],
-        msg.uuid[15]);
-
-    memcpy(g_ps.guestUUID, msg.uuid, sizeof(g_ps.guestUUID));
-    cm.hasUUID = true;
-
-    checkReady();
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_CHANNELS_LIST)
-  {
-    SpiceMainChannelsList *msg = (SpiceMainChannelsList*)alloca(header.size);
-    if ((status = channel_readNL(channel, msg, header.size,
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read SpiceMainChannelsList");
-      return status;
-    }
-
-    for(size_t i = 0; i < msg->num_of_channels; ++i)
-      for(int n = 0; n < PS_CHANNEL_MAX; ++n)
+      PS_STATUS status;
+      if ((status = channel_connect(ch)) != PS_STATUS_OK)
       {
-        struct PSChannel * ch = &g_ps.channels[n];
-        if (ch->spiceType != msg->channels[i].type ||
-            (ch->enable && !*ch->enable))
-          continue;
-
-        if (ch->connected)
-        {
-          purespice_disconnect();
-          PS_LOG_ERROR("Protocol error. The server asked us to reconnect an "
-              "already connected channel (%s)", ch->name);
-          return PS_STATUS_ERROR;
-        }
-
-        if ((status = channel_connect(ch)) != PS_STATUS_OK)
-        {
-          purespice_disconnect();
-          PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-          return PS_STATUS_ERROR;
-        }
-
-        PS_LOG_INFO("%s channel connected", ch->name);
-        break;
+        purespice_disconnect();
+        PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+        return PS_STATUS_ERROR;
       }
 
-    checkReady();
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED)
-  {
-    if ((status = agent_connect()) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      return status;
-    }
-
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS)
-  {
-    uint32_t num_tokens;
-    if ((status = channel_readNL(channel, &num_tokens, sizeof(num_tokens),
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read the number of agent tokens");
-      return status;
-    }
-
-    agent_setServerTokens(num_tokens);
-    if ((status = agent_connect()) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      return status;
-    }
-
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_AGENT_DISCONNECTED)
-  {
-    uint32_t error;
-    if ((status = channel_readNL(channel, &error, sizeof(error),
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read SPICE_MSG_MAIN_AGENT_DISCONNECTED");
-      return status;
-    }
-
-    agent_disconnect();
-    PS_LOG_WARN("Disconnected from the spice guest agent: %u", error);
-    return PS_STATUS_OK;
-  }
-
-  if (header.type == SPICE_MSG_MAIN_AGENT_DATA)
-  {
-    if (!agent_present())
-      if ((status = channel_discardNL(channel, header.size,
-              dataAvailable)) != PS_STATUS_OK)
+      PS_LOG_INFO("%s channel connected", ch->name);
+      if (ch->onConnect && (status = ch->onConnect(ch)) != PS_STATUS_OK)
       {
-        PS_LOG_ERROR("Failed to discard agent data");
-        return status;;
+        purespice_disconnect();
+        PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+        return PS_STATUS_ERROR;
       }
 
-    if ((status = agent_process(header.size,
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      PS_LOG_ERROR("Failed to process agent data");
-      purespice_disconnect();
+      break;
     }
 
+  checkReady();
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainAgentConnected(struct PSChannel * channel)
+{
+  (void)channel;
+
+  PS_STATUS status;
+  if ((status = agent_connect()) != PS_STATUS_OK)
+  {
+    purespice_disconnect();
     return status;
   }
 
-  if (header.type == SPICE_MSG_MAIN_AGENT_TOKEN)
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainAgentConnectedTokens(struct PSChannel * channel)
+{
+  uint32_t num_tokens = *(uint32_t *)channel->buffer;
+
+  agent_setServerTokens(num_tokens);
+  return onMessage_mainAgentConnected(channel);
+}
+
+static PS_STATUS onMessage_mainAgentDisconnected(struct PSChannel * channel)
+{
+  uint32_t error = *(uint32_t *)channel->buffer;
+
+  agent_disconnect();
+  PS_LOG_WARN("Disconnected from the spice guest agent: %u", error);
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_mainAgentData(struct PSChannel * channel)
+{
+  PS_STATUS status;
+  if ((status = agent_process(channel)) != PS_STATUS_OK)
   {
-    uint32_t num_tokens;
-    if ((status = channel_readNL(channel, &num_tokens, sizeof(num_tokens),
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to read the number of agent tokens");
-      return status;
-    }
-
-    agent_returnServerTokens(num_tokens);
-    if (!agent_processQueue())
-    {
-      purespice_disconnect();
-      PS_LOG_ERROR("Failed to process the agent queue");
-      return PS_STATUS_ERROR;
-    }
-
-    return PS_STATUS_OK;
+    PS_LOG_ERROR("Failed to process agent data");
+    purespice_disconnect();
   }
 
-  return channel_discardNL(channel, header.size, dataAvailable);
+  return status;
+}
+
+static PS_STATUS onMessage_mainAgentToken(struct PSChannel * channel)
+{
+  uint32_t num_tokens = *(uint32_t *)channel->buffer;
+
+  agent_returnServerTokens(num_tokens);
+  if (!agent_processQueue())
+  {
+    purespice_disconnect();
+    PS_LOG_ERROR("Failed to process the agent queue");
+    return PS_STATUS_ERROR;
+  }
+
+  return PS_STATUS_OK;
+}
+
+PSHandlerFn channelMain_onMessage(struct PSChannel * channel)
+{
+  if (!channel->initDone)
+  {
+    if (channel->header.type == SPICE_MSG_MAIN_INIT)
+      return onMessage_mainInit;
+
+    purespice_disconnect();
+    PS_LOG_ERROR("Expected SPICE_MSG_MAIN_INIT but got %d", channel->header.type);
+    return PS_HANDLER_ERROR;
+  }
+
+  switch(channel->header.type)
+  {
+    case SPICE_MSG_MAIN_INIT:
+      purespice_disconnect();
+      PS_LOG_ERROR("Unexpected SPICE_MSG_MAIN_INIT");
+      return PS_HANDLER_ERROR;
+
+    case SPICE_MSG_MAIN_NAME:
+      return onMessage_mainName;
+
+    case SPICE_MSG_MAIN_UUID:
+      return onMessage_mainUUID;
+
+    case SPICE_MSG_MAIN_CHANNELS_LIST:
+      return onMessage_mainChannelsList;
+
+    case SPICE_MSG_MAIN_MOUSE_MODE:
+      return PS_HANDLER_DISCARD;
+
+    case SPICE_MSG_MAIN_MULTI_MEDIA_TIME:
+      return PS_HANDLER_DISCARD;
+
+    case SPICE_MSG_MAIN_AGENT_CONNECTED:
+      return onMessage_mainAgentConnected;
+
+    case SPICE_MSG_MAIN_AGENT_CONNECTED_TOKENS:
+      return onMessage_mainAgentConnectedTokens;
+
+    case SPICE_MSG_MAIN_AGENT_DISCONNECTED:
+      return onMessage_mainAgentDisconnected;
+
+    case SPICE_MSG_MAIN_AGENT_DATA:
+      if (!agent_present())
+        return PS_HANDLER_DISCARD;
+      return onMessage_mainAgentData;
+
+    case SPICE_MSG_MAIN_AGENT_TOKEN:
+      return onMessage_mainAgentToken;
+  }
+
+  return PS_HANDLER_ERROR;
 }

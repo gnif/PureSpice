@@ -59,6 +59,48 @@ typedef struct PSServerInfo
 }
 PSServerInfo;
 
+typedef enum PSSurfaceFormat
+{
+  PS_SURFACE_FMT_1_A,
+  PS_SURFACE_FMT_8_A,
+  PS_SURFACE_FMT_16_555,
+  PS_SURFACE_FMT_32_xRGB,
+  PS_SURFACE_FMT_16_565,
+  PS_SURFACE_FMT_32_ARGB
+}
+PSSurfaceFormat;
+
+typedef enum PSBitmapFormat
+{
+  PS_BITMAP_FMT_1BIT_LE,
+  PS_BITMAP_FMT_1BIT_BE,
+  PS_BITMAP_FMT_4BIT_LE,
+  PS_BITMAP_FMT_4BIT_BE,
+  PS_BITMAP_FMT_8BIT,
+  PS_BITMAP_FMT_16BIT,
+  PS_BITMAP_FMT_24BIT,
+  PS_BITMAP_FMT_32BIT,
+  PS_BITMAP_FMT_RGBA,
+  PS_BITMAP_FMT_8BIT_A
+}
+PSBitmapFormat;
+
+typedef enum PSRopd
+{
+  PS_ROPD_INVERS_SRC,
+  PS_ROPD_INVERS_BRUSH,
+  PS_ROPD_INVERS_DEST,
+  PS_ROPD_OP_PUT,
+  PS_ROPD_OP_OR,
+  PS_RPOD_OP_AND,
+  PS_ROPD_OP_XOR,
+  PS_ROPD_OP_BLACKNESS,
+  PS_ROPD_OP_WHITENESS,
+  PS_ROPD_OP_INVERS,
+  PS_ROPD_INVERS_RES
+}
+PSRopd;
+
 typedef struct PSInit
 {
   struct
@@ -145,6 +187,30 @@ typedef struct PSConfig
     void (*stop)(void);
   }
   record;
+
+  struct
+  {
+    /* enable the display channel if available */
+    bool enable;
+
+    /* called to create a new surface */
+    void (*surfaceCreate)(unsigned int surfaceId, PSSurfaceFormat format,
+        unsigned int width, unsigned int height);
+
+    /* called to destroy a surface */
+    void (*surfaceDestroy)(unsigned int surfaceId);
+
+    /* called to draw a bitmap to a surface */
+    void (*drawBitmap)(unsigned int surfaceId,
+        PSBitmapFormat format,
+        bool topDown,
+        int x    , int y,
+        int width, int height,
+        int stride,
+        void * data);
+
+  }
+  display;
 }
 PSConfig;
 

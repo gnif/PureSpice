@@ -69,87 +69,68 @@ const SpiceLinkHeader * channelRecord_getConnectPacket(void)
   return &p.header;
 }
 
-PS_STATUS channelRecord_onRead(struct PSChannel * channel, int * dataAvailable)
+static PS_STATUS onMessage_recordStart(struct PSChannel * channel)
 {
-  SpiceMiniDataHeader header;
+  SpiceMsgRecordStart * msg = (SpiceMsgRecordStart *)channel->buffer;
 
-  PS_STATUS status;
-  if ((status = channel_onRead(channel, &header,
-          dataAvailable)) != PS_STATUS_OK)
-  {
-    if (status != PS_STATUS_HANDLED)
-      PS_LOG_ERROR("Failed to read SpiceMiniDataHeader");
-    return status;
-  }
+  PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
+  if (msg->format == SPICE_AUDIO_FMT_S16)
+    fmt = PS_AUDIO_FMT_S16;
 
+  g_ps.config.record.start(msg->channels, msg->frequency, fmt);
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_recordStop(struct PSChannel * channel)
+{
+  (void)channel;
+
+  g_ps.config.record.stop();
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_recordVolume(struct PSChannel * channel)
+{
+  SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
+
+  uint16_t volume[msg->nchannels];
+  memcpy(&volume, msg->volume, sizeof(volume));
+
+  g_ps.config.record.volume(msg->nchannels, volume);
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_recordMute(struct PSChannel * channel)
+{
+  SpiceMsgAudioMute * msg = (SpiceMsgAudioMute *)channel->buffer;
+
+  g_ps.config.record.mute(msg->mute);
+  return PS_STATUS_OK;
+}
+
+PSHandlerFn channelRecord_onMessage(struct PSChannel * channel)
+{
   channel->initDone = true;
-
-  switch(header.type)
+  switch(channel->header.type)
   {
     case SPICE_MSG_RECORD_START:
-    {
-      SpiceMsgRecordStart in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgRecordStart");
-        return status;
-      }
-
-      PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
-      if (in.format == SPICE_AUDIO_FMT_S16)
-        fmt = PS_AUDIO_FMT_S16;
-
-      g_ps.config.record.start(in.channels, in.frequency, fmt);
-      return PS_STATUS_HANDLED;
-    }
+      return onMessage_recordStart;
 
     case SPICE_MSG_RECORD_STOP:
-      g_ps.config.record.stop();
-      return PS_STATUS_HANDLED;
+      return onMessage_recordStop;
 
     case SPICE_MSG_RECORD_VOLUME:
-    {
-      SpiceMsgAudioVolume * in =
-        (SpiceMsgAudioVolume *)alloca(header.size);
-      if ((status = channel_readNL(channel, in, header.size,
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgAudioVolume");
-        return status;
-      }
-
-      if (g_ps.config.record.volume)
-        g_ps.config.record.volume(in->nchannels, in->volume);
-
-      return PS_STATUS_HANDLED;
-    }
+      if (!g_ps.config.record.volume)
+        return PS_HANDLER_DISCARD;
+      return onMessage_recordVolume;
 
     case SPICE_MSG_RECORD_MUTE:
-    {
-      SpiceMsgAudioMute in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgAudioMute");
-        return status;
-      }
-
-      if (g_ps.config.record.mute)
-        g_ps.config.record.mute(in.mute);
-
-      return PS_STATUS_HANDLED;
-    }
+      if (!g_ps.config.record.mute)
+        return PS_HANDLER_DISCARD;
+      return onMessage_recordMute;
   }
 
-  if ((status = channel_discardNL(channel, header.size,
-          dataAvailable) != PS_STATUS_OK))
-  {
-    PS_LOG_ERROR("Failed to discard %d bytes", header.size);
-    return status;
-  }
-
-  return PS_STATUS_OK;
+  return PS_HANDLER_ERROR;
 }
 
 bool purespice_writeAudio(void * data, size_t size, uint32_t time)

@@ -128,84 +128,49 @@ void agent_disconnect(void)
   agent.present = false;
 }
 
-PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
+#pragma pack(push,1)
+struct Selection
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  uint8_t selection;
+  uint8_t reserved[3];
+};
+#pragma pack(pop)
 
-  PS_STATUS status;
+PS_STATUS agent_process(struct PSChannel * channel)
+{
   if (agent.cbRemain)
   {
-    const uint32_t r = agent.cbRemain > dataSize ? dataSize : agent.cbRemain;
-    if ((status = channel_readNL(channel, agent.cbBuffer + agent.cbSize, r,
-            dataAvailable)) != PS_STATUS_OK)
-    {
-      free(agent.cbBuffer);
-      agent.cbBuffer = NULL;
-      agent.cbRemain = 0;
-      agent.cbSize   = 0;
-      PS_LOG_ERROR("Failed to read the remaining data");
-      return status;
-    }
+    memcpy(agent.cbBuffer + agent.cbSize, channel->buffer, channel->header.size);
+    agent.cbRemain -= channel->header.size;
+    agent.cbSize   += channel->header.size;
 
-    agent.cbRemain -= r;
-    agent.cbSize   += r;
-
-    if (agent.cbRemain == 0)
+    if (!agent.cbRemain)
       agent_onClipboard();
 
     return PS_STATUS_OK;
   }
 
-  VDAgentMessage msg;
 
-  #pragma pack(push,1)
-  struct Selection
-  {
-    uint8_t selection;
-    uint8_t reserved[3];
-  };
-  #pragma pack(pop)
+  uint8_t        * data     = channel->buffer;
+  unsigned int     dataSize = channel->header.size;
+  VDAgentMessage * msg      = (VDAgentMessage *)data;
+  data     += sizeof(*msg);
+  dataSize -= sizeof(*msg);
 
-  if ((status = channel_readNL(channel, &msg, sizeof(msg),
-          dataAvailable)) != PS_STATUS_OK)
-  {
-    PS_LOG_ERROR("Failed to read the VDAgentMessage");
-    return status;
-  }
-
-  dataSize -= sizeof(msg);
-
-  if (msg.protocol != VD_AGENT_PROTOCOL)
+  if (msg->protocol != VD_AGENT_PROTOCOL)
   {
     PS_LOG_ERROR("VDAgent protocol %d expected, but got %d",
-        VD_AGENT_PROTOCOL, msg.protocol);
+        VD_AGENT_PROTOCOL, msg->protocol);
     return PS_STATUS_ERROR;
   }
 
-  switch(msg.type)
+  switch(msg->type)
   {
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
     {
-      // make sure the message size is not insane to avoid a stack overflow
-      // since we are using alloca for performance
-      if (msg.size > 1024)
-      {
-        PS_LOG_ERROR("The spice guest agent sent an invalid message size: %d",
-            msg.size);
-        return PS_STATUS_ERROR;
-      }
+      VDAgentAnnounceCapabilities * caps = (VDAgentAnnounceCapabilities *)data;
+      const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg->size);
 
-      VDAgentAnnounceCapabilities *caps =
-        (VDAgentAnnounceCapabilities *)alloca(msg.size);
-
-      if ((status = channel_readNL(channel, caps, msg.size,
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read VDAgentAnnouceCapabilities");
-        return status;
-      }
-
-      const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg.size);
       agent.cbSupported  =
         VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize,
             VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) ||
@@ -227,43 +192,28 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
     case VD_AGENT_CLIPBOARD_GRAB:
     case VD_AGENT_CLIPBOARD_RELEASE:
     {
-      uint32_t remaining = msg.size;
+      // all clipboard messages might have this
       if (agent.cbSelection)
       {
-        struct Selection selection;
-        if ((status = channel_readNL(channel, &selection, sizeof(selection),
-                dataAvailable)) != PS_STATUS_OK)
-        {
-          PS_LOG_ERROR("Failed to read the selection packet");
-          return status;
-        }
-        remaining -= sizeof(selection);
-        dataSize  -= sizeof(selection);
+        struct Selection * selection = (struct Selection *)data;
+        data     += sizeof(*selection);
+        dataSize -= sizeof(*selection);
       }
 
-      if (msg.type == VD_AGENT_CLIPBOARD_RELEASE)
+      switch(msg->type)
       {
-        agent.cbAgentGrabbed = false;
-        if (g_ps.config.clipboard.enable)
-          g_ps.config.clipboard.release();
-        return PS_STATUS_OK;
-      }
+        case VD_AGENT_CLIPBOARD_RELEASE:
+          agent.cbAgentGrabbed = false;
+          if (g_ps.config.clipboard.enable)
+            g_ps.config.clipboard.release();
+          return PS_STATUS_OK;
 
-      if (msg.type == VD_AGENT_CLIPBOARD ||
-          msg.type == VD_AGENT_CLIPBOARD_REQUEST)
-      {
-        uint32_t type;
-        if ((status = channel_readNL(channel, &type, sizeof(type),
-                dataAvailable)) != PS_STATUS_OK)
+        case VD_AGENT_CLIPBOARD:
         {
-          PS_LOG_ERROR("Failed to read the clipboard data type");
-          return status;
-        }
-        remaining -= sizeof(type);
-        dataSize  -= sizeof(type);
+          uint32_t * type = (uint32_t *)data;
+          data     += sizeof(*type);
+          dataSize -= sizeof(*type);
 
-        if (msg.type == VD_AGENT_CLIPBOARD)
-        {
           if (agent.cbBuffer)
           {
             PS_LOG_ERROR(
@@ -271,90 +221,59 @@ PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable)
             return PS_STATUS_ERROR;
           }
 
-          agent.cbSize     = 0;
-          agent.cbRemain   = remaining;
-          agent.cbBuffer   = (uint8_t *)malloc(remaining);
-          const uint32_t r = remaining > dataSize ? dataSize : remaining;
-
+          const unsigned int totalData = msg->size - sizeof(*type);
+          agent.cbBuffer = (uint8_t *)malloc(totalData);
           if (!agent.cbBuffer)
           {
-            PS_LOG_ERROR("Failed to malloc %d bytes", remaining);
+            PS_LOG_ERROR("Failed to allocate buffer for clipboard transfer");
             return PS_STATUS_ERROR;
           }
 
-          if ((status = channel_readNL(channel, agent.cbBuffer, r,
-                  dataAvailable)) != PS_STATUS_OK)
-          {
-            free(agent.cbBuffer);
-            agent.cbBuffer = NULL;
-            agent.cbRemain = 0;
-            agent.cbSize   = 0;
-            PS_LOG_ERROR("Failed to read the clipboard data");
-            return status;
-          }
-
-          agent.cbRemain -= r;
-          agent.cbSize   += r;
+          agent.cbSize   = dataSize;
+          agent.cbRemain = totalData - dataSize;
+          memcpy(agent.cbBuffer, data, dataSize);
 
           if (agent.cbRemain == 0)
             agent_onClipboard();
 
           return PS_STATUS_OK;
         }
-        else
+
+        case VD_AGENT_CLIPBOARD_REQUEST:
         {
+          uint32_t * type = (uint32_t *)data;
+          data += sizeof(type);
+
           if (g_ps.config.clipboard.enable)
-            g_ps.config.clipboard.request(agentTypeToPSType(type));
-          return PS_STATUS_OK;
-        }
-      }
-      else
-      {
-        if (remaining == 0)
-          return PS_STATUS_OK;
-
-        // ensure the size is sane to avoid a stack overflow since we use alloca
-        // for performance
-        if (remaining > 1024)
-        {
-          PS_LOG_ERROR("The spice guest agent sent an invalid message size: %d",
-              msg.size);
-          return PS_STATUS_ERROR;
-        }
-
-        uint32_t *types = alloca(remaining);
-        if ((status = channel_readNL(channel, types, remaining,
-                dataAvailable)) != PS_STATUS_OK)
-        {
-          PS_LOG_ERROR("Failed to read the supported data types");
-          return status;
-        }
-
-        // there is zero documentation on the types field, it might be a bitfield
-        // but for now we are going to assume it's not.
-
-        agent.cbType          = agentTypeToPSType(types[0]);
-        agent.cbAgentGrabbed  = true;
-        agent.cbClientGrabbed = false;
-        if (agent.cbSelection)
-        {
-          // Windows doesnt support this, so until it's needed there is no point
-          // messing with it
+            g_ps.config.clipboard.request(agentTypeToPSType(*type));
           return PS_STATUS_OK;
         }
 
-        if (g_ps.config.clipboard.enable)
-          g_ps.config.clipboard.notice(agent.cbType);
-        return PS_STATUS_OK;
+        case VD_AGENT_CLIPBOARD_GRAB:
+        {
+          uint32_t *types = (uint32_t *)data;
+          data += sizeof(*types);
+
+          // there is zero documentation on the types field, it might be a
+          // bitfield but for now we are going to assume it's not.
+
+          agent.cbType          = agentTypeToPSType(types[0]);
+          agent.cbAgentGrabbed  = true;
+          agent.cbClientGrabbed = false;
+          if (agent.cbSelection)
+          {
+            // Windows doesnt support this, so until it's needed there is no point
+            // messing with it
+            return PS_STATUS_OK;
+          }
+
+          if (g_ps.config.clipboard.enable)
+            g_ps.config.clipboard.notice(agent.cbType);
+
+          return PS_STATUS_OK;
+        }
       }
     }
-  }
-
-  if ((status = channel_discardNL(channel, msg.size,
-          dataAvailable)) != PS_STATUS_OK)
-  {
-    PS_LOG_ERROR("Failed to discard %d bytes", msg.size);
-    return status;
   }
 
   return PS_STATUS_OK;

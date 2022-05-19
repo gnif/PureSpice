@@ -109,6 +109,7 @@ typedef enum
   PS_CHANNEL_INPUTS,
   PS_CHANNEL_PLAYBACK,
   PS_CHANNEL_RECORD,
+  PS_CHANNEL_DISPLAY,
 
   PS_CHANNEL_MAX
 }
@@ -123,6 +124,11 @@ typedef enum
 }
 PS_STATUS;
 
+struct PSChannel;
+typedef PS_STATUS (*PSHandlerFn)(struct PSChannel * channel);
+#define PS_HANDLER_DISCARD (PSHandlerFn)( 0)
+#define PS_HANDLER_ERROR   (PSHandlerFn)(-1)
+
 // internal structures
 struct PSChannel
 {
@@ -130,11 +136,21 @@ struct PSChannel
   const char * name;
   bool       * enable;
 
+  SpiceMiniDataHeader header;
+  unsigned int headerRead;
+  PSHandlerFn  handlerFn;
+  uint8_t    * buffer;
+  unsigned int bufferSize;
+  unsigned int bufferRead;
+  bool         discarding;
+  unsigned int discardSize;
+
   const SpiceLinkHeader * (*getConnectPacket)(void);
   void (*setCaps)(
       const uint32_t * common , int numCommon,
       const uint32_t * channel, int numChannel);
-  PS_STATUS (*read)(struct PSChannel * channel, int * dataAvailable);
+  PS_STATUS   (*onConnect)(struct PSChannel * channel);
+  PSHandlerFn (*onMessage)(struct PSChannel * channel);
 
   bool        connected;
   bool        ready;

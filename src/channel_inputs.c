@@ -66,74 +66,64 @@ const SpiceLinkHeader * channelInputs_getConnectPacket(void)
   return &p.header;
 }
 
-PS_STATUS channelInputs_onRead(struct PSChannel * channel, int * dataAvailable)
+static PS_STATUS onMessage_inputsInit(struct PSChannel * channel)
 {
-  SpiceMiniDataHeader header;
+  channel->initDone = true;
+  //SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
 
-  PS_STATUS status;
-  if ((status = channel_onRead(channel, &header,
-          dataAvailable)) != PS_STATUS_OK)
-    return status;
+  return PS_STATUS_OK;
+}
 
-  switch(header.type)
+static PS_STATUS onMessage_inputsKeyModifiers(struct PSChannel * channel)
+{
+  SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
+  g_ps.kb.modifiers = msg->modifiers;
+  return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_inputsMouseMotionAck(struct PSChannel * channel)
+{
+  (void)channel;
+
+  const int count = atomic_fetch_sub(&g_ps.mouse.sentCount,
+      SPICE_INPUT_MOTION_ACK_BUNCH);
+
+  if (count < SPICE_INPUT_MOTION_ACK_BUNCH)
   {
-    case SPICE_MSG_INPUTS_INIT:
-    {
-      if (channel->initDone)
-      {
-        PS_LOG_ERROR("Got SPICE_MSG_INPUTS_INIT before initDone");
-        return PS_STATUS_ERROR;
-      }
-
-      channel->initDone = true;
-
-      SpiceMsgInputsInit in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgInputsInit");
-        return status;
-      }
-
-      return PS_STATUS_OK;
-    }
-
-    case SPICE_MSG_INPUTS_KEY_MODIFIERS:
-    {
-      SpiceMsgInputsInit in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgInputsInit");
-        return status;
-      }
-
-      g_ps.kb.modifiers = in.modifiers;
-      return PS_STATUS_OK;
-    }
-
-    case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
-    {
-      const int count = atomic_fetch_sub(&g_ps.mouse.sentCount,
-          SPICE_INPUT_MOTION_ACK_BUNCH);
-      if (count < SPICE_INPUT_MOTION_ACK_BUNCH)
-      {
-        PS_LOG_ERROR("Server sent an ack for more messages then expected");
-        return PS_STATUS_ERROR;
-      }
-
-      return PS_STATUS_OK;
-    }
-  }
-
-  if ((status = channel_discardNL(channel, header.size,
-          dataAvailable)) != PS_STATUS_OK)
-  {
-    PS_LOG_ERROR("Failed to discard %d bytes", header.size);
-    return status;
+    PS_LOG_ERROR("Server sent an ack for more messages then expected");
+    return PS_STATUS_ERROR;
   }
 
   return PS_STATUS_OK;
+}
+
+PSHandlerFn channelInputs_onMessage(struct PSChannel * channel)
+{
+  if (!channel->initDone)
+  {
+    if (channel->header.type == SPICE_MSG_INPUTS_INIT)
+      return onMessage_inputsInit;
+
+    purespice_disconnect();
+    PS_LOG_ERROR("Expected  SPICE_MSG_INPUTS_INIT but got %d", channel->header.type);
+    return PS_HANDLER_ERROR;
+  }
+
+  switch(channel->header.type)
+  {
+    case SPICE_MSG_INPUTS_INIT:
+      purespice_disconnect();
+      PS_LOG_ERROR("Unexpected SPICE_MSG_INPUTS_INIT");
+      return PS_HANDLER_ERROR;
+
+    case SPICE_MSG_INPUTS_KEY_MODIFIERS:
+      return onMessage_inputsKeyModifiers;
+
+    case SPICE_MSG_INPUTS_MOUSE_MOTION_ACK:
+      return onMessage_inputsMouseMotionAck;
+  }
+
+  return PS_HANDLER_DISCARD;
 }
 
 bool purespice_keyDown(uint32_t code)

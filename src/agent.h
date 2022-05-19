@@ -29,6 +29,6 @@ void agent_returnServerTokens(unsigned int tokens);
 
 void agent_disconnect(void);
 
-PS_STATUS agent_process(uint32_t dataSize, int * dataAvailable);
+PS_STATUS agent_process(struct PSChannel * channel);
 
 bool agent_processQueue(void);

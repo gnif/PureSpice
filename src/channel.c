@@ -29,6 +29,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <time.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #include <sys/epoll.h>
 #include <netinet/tcp.h>
@@ -244,106 +245,87 @@ void channel_disconnect(struct PSChannel * channel)
 
   epoll_ctl(g_ps.epollfd, EPOLL_CTL_DEL, channel->socket, NULL);
   shutdown(channel->socket, SHUT_WR);
+
+  channel->bufferRead = 0;
+  channel->headerRead = 0;
+  channel->bufferSize = 0;
+  free(channel->buffer);
+  channel->buffer = NULL;
 }
 
-PS_STATUS channel_onRead(struct PSChannel * channel, SpiceMiniDataHeader * header,
-    int * dataAvailable)
+static PS_STATUS onMessage_setAck(struct PSChannel * channel)
 {
-  PS_STATUS status;
-  if ((status = channel_readNL(channel, header, sizeof(SpiceMiniDataHeader),
-          dataAvailable)) != PS_STATUS_OK)
-    return status;
+  SpiceMsgSetAck * msg = (SpiceMsgSetAck *)channel->buffer;
 
-  if (!channel->connected)
-    return PS_STATUS_HANDLED;
+  channel->ackFrequency = msg->window;
+  PS_LOG_INFO("%s ackFrequency: %d", channel->name, channel->ackFrequency);
 
-  if (!channel->initDone)
-    return PS_STATUS_OK;
+  SpiceMsgcAckSync * out =
+    SPICE_PACKET(SPICE_MSGC_ACK_SYNC, SpiceMsgcAckSync, 0);
 
-  switch(header->type)
+  out->generation = msg->generation;
+  return SPICE_SEND_PACKET(channel, out) ?
+    PS_STATUS_OK : PS_STATUS_ERROR;
+}
+
+static PS_STATUS onMessage_ping(struct PSChannel * channel)
+{
+  SpiceMsgPing * msg = (SpiceMsgPing *)channel->buffer;
+
+  SpiceMsgcPong * out =
+    SPICE_PACKET(SPICE_MSGC_PONG, SpiceMsgcPong, 0);
+
+  out->id        = msg->id;
+  out->timestamp = msg->timestamp;
+  if (!SPICE_SEND_PACKET(channel, out))
   {
-    case SPICE_MSG_MIGRATE:
-    case SPICE_MSG_MIGRATE_DATA:
-      return PS_STATUS_HANDLED;
-
-    case SPICE_MSG_SET_ACK:
-    {
-      SpiceMsgSetAck in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgSetAck");
-        return status;
-      }
-
-      channel->ackFrequency = in.window;
-
-      SpiceMsgcAckSync * out =
-        SPICE_PACKET(SPICE_MSGC_ACK_SYNC, SpiceMsgcAckSync, 0);
-
-      out->generation = in.generation;
-      return SPICE_SEND_PACKET(channel, out) ?
-        PS_STATUS_HANDLED : PS_STATUS_ERROR;
-    }
-
-    case SPICE_MSG_PING:
-    {
-      SpiceMsgPing in;
-      if ((status = channel_readNL(channel, &in, sizeof(in),
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgPing");
-        return status;
-      }
-
-      const int discard = header->size - sizeof(in);
-      if ((status = channel_discardNL(channel, discard,
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to discard the ping data");
-        return status;
-      }
-
-      SpiceMsgcPong * out =
-        SPICE_PACKET(SPICE_MSGC_PONG, SpiceMsgcPong, 0);
-
-      out->id        = in.id;
-      out->timestamp = in.timestamp;
-      if (!SPICE_SEND_PACKET(channel, out))
-      {
-        PS_LOG_ERROR("Failed to send SpiceMsgcPong");
-        return PS_STATUS_ERROR;
-      }
-
-      return PS_STATUS_HANDLED;
-    }
-
-    case SPICE_MSG_WAIT_FOR_CHANNELS:
-      return PS_STATUS_HANDLED;
-
-    case SPICE_MSG_DISCONNECTING:
-    {
-      shutdown(channel->socket, SHUT_WR);
-      PS_LOG_INFO("Server sent disconnect message");
-      return PS_STATUS_HANDLED;
-    }
-
-    case SPICE_MSG_NOTIFY:
-    {
-      SpiceMsgNotify * in = (SpiceMsgNotify *)alloca(header->size);
-      if ((status = channel_readNL(channel, in, header->size,
-              dataAvailable)) != PS_STATUS_OK)
-      {
-        PS_LOG_ERROR("Failed to read SpiceMsgNotify");
-        return status;
-      }
-
-      PS_LOG_INFO("[notify] %s", in->message);
-      return PS_STATUS_HANDLED;
-    }
+    PS_LOG_ERROR("Failed to send SpiceMsgcPong");
+    return PS_STATUS_ERROR;
   }
 
   return PS_STATUS_OK;
+}
+
+static PS_STATUS onMessage_disconnecting(struct PSChannel * channel)
+{
+  shutdown(channel->socket, SHUT_WR);
+  PS_LOG_INFO("Server sent disconnect message");
+  return PS_STATUS_HANDLED;
+}
+
+static PS_STATUS onMessage_notify(struct PSChannel * channel)
+{
+  SpiceMsgNotify * msg = (SpiceMsgNotify *)channel->buffer;
+
+  PS_LOG_INFO("[notify] %s", msg->message);
+  return PS_STATUS_OK;
+}
+
+PSHandlerFn channel_onMessage(struct PSChannel * channel)
+{
+  switch(channel->header.type)
+  {
+    case SPICE_MSG_MIGRATE:
+    case SPICE_MSG_MIGRATE_DATA:
+      return PS_HANDLER_DISCARD;
+
+    case SPICE_MSG_SET_ACK:
+      return onMessage_setAck;
+
+    case SPICE_MSG_PING:
+      return onMessage_ping;
+
+    case SPICE_MSG_WAIT_FOR_CHANNELS:
+      return PS_HANDLER_DISCARD;
+
+    case SPICE_MSG_DISCONNECTING:
+      return onMessage_disconnecting;
+
+    case SPICE_MSG_NOTIFY:
+      return onMessage_notify;
+  }
+
+  return PS_HANDLER_ERROR;
 }
 
 bool channel_ack(struct PSChannel * channel)
@@ -351,7 +333,7 @@ bool channel_ack(struct PSChannel * channel)
   if (channel->ackFrequency == 0)
     return true;
 
-  if (channel->ackCount++ != channel->ackFrequency)
+  if (++channel->ackCount != channel->ackFrequency)
     return true;
 
   channel->ackCount = 0;
