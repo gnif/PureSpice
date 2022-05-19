@@ -27,6 +27,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "channel_inputs.h"
 #include "channel_playback.h"
 #include "channel_record.h"
+#include "channel_display.h"
 
 #include "messages.h"
 #include "rsa.h"
@@ -78,6 +79,14 @@ struct PS g_ps =
       .enable           = &g_ps.config.record.enable,
       .getConnectPacket = channelRecord_getConnectPacket,
       .onMessage        = channelRecord_onMessage,
+    },
+    {
+      .spiceType        = SPICE_CHANNEL_DISPLAY,
+      .name             = "DISPLAY",
+      .enable           = &g_ps.config.display.enable,
+      .getConnectPacket = channelDisplay_getConnectPacket,
+      .onConnect        = channelDisplay_onConnect,
+      .onMessage        = channelDisplay_onMessage
     }
   }
 };
