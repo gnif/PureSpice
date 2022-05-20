@@ -183,11 +183,10 @@ static void resolveSpicePattern(const uint8_t * data, uint8_t **ptr,
 static void resolveSpiceBrush(const uint8_t * data, uint8_t **ptr,
     SpiceBrush * dst)
 {
-  uint32_t type;
-  memcpy(&type, *ptr, sizeof(type));
-  *ptr += sizeof(type);
+  memcpy(&dst->type, *ptr, sizeof(dst->type));
+  *ptr += sizeof(dst->type);
 
-  switch(type)
+  switch(dst->type)
   {
     case SPICE_BRUSH_TYPE_NONE:
       return;
