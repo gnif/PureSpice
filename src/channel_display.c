@@ -109,26 +109,128 @@ static void resolveDisplayBase(uint8_t ** ptr, SpiceMsgDisplayBase * base)
   }
 }
 
-static void resolveSpiceCopy(const uint8_t * data, uint8_t ** ptr, SpiceCopy * dst)
+static void resolveSpicePoint(uint8_t ** ptr, SpicePoint * dst)
+{
+  memcpy(dst, ptr, sizeof(*dst));
+  *ptr += sizeof(*dst);
+}
+
+static void resolveSpicePalette(const uint8_t * data, uint8_t ** ptr,
+    SpicePalette ** dst, uint64_t *dst_id)
 {
   uint32_t offset;
   memcpy(&offset, *ptr, sizeof(offset));
   *ptr += sizeof(offset);
-  dst->src_bitmap = (SpiceImage *)(offset > 0 ? data + offset : NULL);
+
+  if (offset)
+  {
+    *dst = (SpicePalette *)data + offset;
+    memcpy(dst_id, ptr, sizeof(*dst_id));
+    ptr += sizeof(*dst_id);
+  }
+  else
+  {
+    *dst    = NULL;
+    *dst_id = 0;
+  }
+}
+
+static void resolveSpiceImage(const uint8_t * data, uint8_t ** ptr,
+    SpiceImage ** dst)
+{
+  uint32_t offset;
+  memcpy(&offset, *ptr, sizeof(offset));
+  *ptr += sizeof(offset);
+  *dst  = (SpiceImage *)(offset > 0 ? data + offset : NULL);
+}
+
+static void resolveSpiceQMask(const uint8_t * data, uint8_t **ptr,
+    SpiceQMask * dst)
+{
+  const int copy =
+    sizeof(dst->flags) +
+    sizeof(dst->pos  );
+
+  memcpy(dst, *ptr, copy);
+  *ptr += copy;
+
+  resolveSpiceImage(data, ptr, &dst->bitmap);
+}
+
+static void resolveSpiceCopy(const uint8_t * data, uint8_t ** ptr,
+    SpiceCopy * dst)
+{
+  resolveSpiceImage(data, ptr, &dst->src_bitmap);
 
   const int copy =
       sizeof(dst->src_area      ) +
       sizeof(dst->rop_descriptor) +
-      sizeof(dst->scale_mode    ) +
-      sizeof(dst->mask.flags    ) +
-      sizeof(dst->mask.pos      );
+      sizeof(dst->scale_mode    );
 
   memcpy(&dst->src_area, *ptr, copy);
   *ptr += copy;
 
-  memcpy(&offset, data, sizeof(offset));
-  *ptr += sizeof(offset);
-  dst->mask.bitmap = (SpiceImage *)(offset > 0 ? data + offset : NULL);
+  resolveSpiceQMask(data, ptr, &dst->mask);
+}
+
+static void resolveSpicePattern(const uint8_t * data, uint8_t **ptr,
+    SpicePattern * dst)
+{
+  resolveSpiceImage(data, ptr, &dst->pat);
+  resolveSpicePoint(      ptr, &dst->pos);
+}
+
+static void resolveSpiceBrush(const uint8_t * data, uint8_t **ptr,
+    SpiceBrush * dst)
+{
+  uint32_t type;
+  memcpy(&type, *ptr, sizeof(type));
+  *ptr += sizeof(type);
+
+  switch(type)
+  {
+    case SPICE_BRUSH_TYPE_NONE:
+      return;
+
+    case SPICE_BRUSH_TYPE_SOLID:
+      memcpy(&dst->u.color, *ptr, sizeof(dst->u.color));
+      *ptr += sizeof(dst->u.color);
+      return;
+
+    case SPICE_BRUSH_TYPE_PATTERN:
+      resolveSpicePattern(data, ptr, &dst->u.pattern);
+      return;
+  }
+}
+
+static void resolveSpiceFill(const uint8_t * data, uint8_t **ptr,
+    SpiceFill * dst)
+{
+  resolveSpiceBrush(data, ptr, &dst->brush);
+
+  memcpy(&dst->rop_descriptor, *ptr, sizeof(dst->rop_descriptor));
+  *ptr += sizeof(dst->rop_descriptor);
+
+  resolveSpiceQMask(data, ptr, &dst->mask);
+}
+
+static void readSpiceBitmap(const uint8_t * data, const SpiceImage * img,
+    SpiceBitmap * dst)
+{
+  uint8_t * ptr = (uint8_t *)&img->u.bitmap;
+
+  const int copy =
+      sizeof(dst->format) +
+      sizeof(dst->flags ) +
+      sizeof(dst->x     ) +
+      sizeof(dst->y     ) +
+      sizeof(dst->stride);
+
+  memcpy(dst, ptr, copy);
+  ptr += copy;
+
+  resolveSpicePalette(data, &ptr, &dst->palette, &dst->palette_id);
+  dst->data = ptr;
 }
 
 static void resolveDisplayDrawCopy(uint8_t * data, SpiceMsgDisplayDrawCopy * dst)
@@ -138,38 +240,11 @@ static void resolveDisplayDrawCopy(uint8_t * data, SpiceMsgDisplayDrawCopy * dst
   resolveSpiceCopy  (data, &ptr, &dst->data);
 }
 
-static void resolveSpiceBitmap(const uint8_t * data, const SpiceImage * img,
-    SpiceBitmap * bmp)
+static void resolveDisplayDrawFill(uint8_t * data, SpiceMsgDisplayDrawFill * dst)
 {
-  uint8_t * ptr = (uint8_t *)&img->u.bitmap;
-
-  const int copy =
-      sizeof(bmp->format      ) +
-      sizeof(bmp->flags       ) +
-      sizeof(bmp->x           ) +
-      sizeof(bmp->y           ) +
-      sizeof(bmp->stride      );
-
-  memcpy(bmp, ptr, copy);
-  ptr += copy;
-
-  uint32_t offset;
-  memcpy(&offset, ptr, sizeof(offset));
-  ptr += sizeof(offset);
-
-  if (offset)
-  {
-    bmp->palette = (SpicePalette *)data + offset;
-    memcpy(&bmp->palette_id, ptr, sizeof(bmp->palette_id));
-    ptr += sizeof(bmp->palette_id);
-  }
-  else
-  {
-    bmp->palette    = NULL;
-    bmp->palette_id = 0;
-  }
-
-  bmp->data = ptr;
+  uint8_t * ptr = data;
+  resolveDisplayBase(      &ptr, &dst->base);
+  resolveSpiceFill  (data, &ptr, &dst->data);
 }
 
 static PS_STATUS onMessage_displaySurfaceCreate(struct PSChannel * channel)
@@ -207,13 +282,12 @@ static PS_STATUS onMessage_displaySurfaceDestroy(struct PSChannel * channel)
 
 static PS_STATUS onMessage_displayDrawFill(struct PSChannel * channel)
 {
-  SpiceMsgDisplayDrawFill * msg = (SpiceMsgDisplayDrawFill *)channel->buffer;
-  (void)msg;
+  SpiceMsgDisplayDrawFill dst;
+  resolveDisplayDrawFill(channel->buffer, &dst);
 
   return PS_STATUS_OK;
 }
 
-#include <stdio.h>
 static PS_STATUS onMessage_displayDrawCopy(struct PSChannel * channel)
 {
   SpiceMsgDisplayDrawCopy dst;
@@ -231,7 +305,8 @@ static PS_STATUS onMessage_displayDrawCopy(struct PSChannel * channel)
     case SPICE_IMAGE_TYPE_BITMAP:
     {
       SpiceBitmap bmp;
-      resolveSpiceBitmap(channel->buffer, dst.data.src_bitmap, &bmp);
+      readSpiceBitmap(channel->buffer, dst.data.src_bitmap, &bmp);
+
       g_ps.config.display.drawBitmap(
           dst.base.surface_id,
           PS_BITMAP_FMT_RGBA,

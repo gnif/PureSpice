@@ -91,28 +91,28 @@ SpiceLZ4Data;
 
 typedef struct SpiceLZPLTData
 {
-  uint8_t  flags;
-  uint32_t data_size;
-  uint32_t palette_ptr; //SpicePalette
-  uint64_t palette_id;
-  uint32_t data_ptr;    //SpiceChunks
+  uint8_t        flags;
+  uint32_t       data_size;
+  SpicePalette * palette;
+  uint64_t       palette_id;
+  SpiceChunks  * data;
 }
 SpiceLZPLTData;
 
 typedef struct SpiceZlibGlzRGBData
 {
-  uint32_t glz_data_size;
-  uint32_t data_size;
-  uint32_t data_ptr; //SpiceChunks
+  uint32_t      glz_data_size;
+  uint32_t      data_size;
+  SpiceChunks * data;
 }
 SpiceZlibGlzRGBData;
 
 typedef struct SpiceJPEGAlphaData
 {
-  uint8_t  flags;
-  uint32_t jpeg_size;
-  uint32_t data_size;
-  uint32_t data_ptr; //SpiceChunks
+  uint8_t       flags;
+  uint32_t      jpeg_size;
+  uint32_t      data_size;
+  SpiceChunks * data;
 }
 SpiceJPEGAlphaData;
 
