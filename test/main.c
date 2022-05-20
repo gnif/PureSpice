@@ -174,6 +174,17 @@ static void display_surfaceDestroy(unsigned int surfaceId)
   }
 }
 
+static void display_drawFill(unsigned int surfaceId,
+    int x, int y,
+    int width, int height,
+    uint32_t color)
+{
+  printf("display_drawFill(%d, %d, %d, %d, 0x%08x)\n",
+      x, y,
+      width, height,
+      color);
+}
+
 static void display_drawBitmap(unsigned int surfaceId,
     PSBitmapFormat format,
     bool topDown,
@@ -328,6 +339,7 @@ int main(int argc, char * argv[])
       .enable         = true,
       .surfaceCreate  = display_surfaceCreate,
       .surfaceDestroy = display_surfaceDestroy,
+      .drawFill       = display_drawFill,
       .drawBitmap     = display_drawBitmap
     }
   };

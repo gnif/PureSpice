@@ -285,6 +285,19 @@ static PS_STATUS onMessage_displayDrawFill(struct PSChannel * channel)
   SpiceMsgDisplayDrawFill dst;
   resolveDisplayDrawFill(channel->buffer, &dst);
 
+  if (dst.data.brush.type != SPICE_BRUSH_TYPE_SOLID)
+  {
+    PS_LOG_WARN("PureSpice only supports solid brushes for now");
+    return PS_STATUS_OK;
+  }
+
+  g_ps.config.display.drawFill(
+      dst.base.surface_id,
+      dst.base.box.left,
+      dst.base.box.top,
+      dst.base.box.right  - dst.base.box.left,
+      dst.base.box.bottom - dst.base.box.top,
+      dst.data.brush.u.color);
   return PS_STATUS_OK;
 }
 
@@ -296,7 +309,7 @@ static PS_STATUS onMessage_displayDrawCopy(struct PSChannel * channel)
   // we only support bitmaps for now
   if (!dst.data.src_bitmap)
   {
-    PS_LOG_ERROR("PureSpice only supports bitmaps for now");
+    PS_LOG_WARN("PureSpice only supports bitmaps for now");
     return PS_STATUS_OK;
   }
 

@@ -209,6 +209,11 @@ typedef struct PSConfig
         int stride,
         void * data);
 
+    /* called to fill an area with a color */
+    void (*drawFill)(unsigned int surfaceId,
+        int x    , int y,
+        int width, int height,
+        uint32_t color);
   }
   display;
 }
