@@ -219,11 +219,12 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
         return PS_STATUS_ERROR;
       }
 
-      if (!ps_connectChannel(ch))
+      PS_STATUS status = ps_connectChannel(ch);
+      if (status != PS_STATUS_OK)
       {
         purespice_disconnect();
         PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-        return PS_STATUS_ERROR;
+        return status;
       }
 
       break;
