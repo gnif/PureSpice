@@ -66,7 +66,7 @@ const SpiceLinkHeader * channelInputs_getConnectPacket(void)
   return &p.header;
 }
 
-static PS_STATUS onMessage_inputsInit(struct PSChannel * channel)
+static PS_STATUS onMessage_inputsInit(PSChannel * channel)
 {
   channel->initDone = true;
   //SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
@@ -74,14 +74,14 @@ static PS_STATUS onMessage_inputsInit(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_inputsKeyModifiers(struct PSChannel * channel)
+static PS_STATUS onMessage_inputsKeyModifiers(PSChannel * channel)
 {
   SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
   g_ps.kb.modifiers = msg->modifiers;
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_inputsMouseMotionAck(struct PSChannel * channel)
+static PS_STATUS onMessage_inputsMouseMotionAck(PSChannel * channel)
 {
   (void)channel;
 
@@ -97,7 +97,7 @@ static PS_STATUS onMessage_inputsMouseMotionAck(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-PSHandlerFn channelInputs_onMessage(struct PSChannel * channel)
+PSHandlerFn channelInputs_onMessage(PSChannel * channel)
 {
   if (!channel->initDone)
   {
@@ -128,7 +128,7 @@ PSHandlerFn channelInputs_onMessage(struct PSChannel * channel)
 
 bool purespice_keyDown(uint32_t code)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -151,7 +151,7 @@ bool purespice_keyDown(uint32_t code)
 
 bool purespice_keyUp(uint32_t code)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -176,7 +176,7 @@ bool purespice_keyUp(uint32_t code)
 
 bool purespice_keyModifiers(uint32_t modifiers)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -196,7 +196,7 @@ bool purespice_keyModifiers(uint32_t modifiers)
 
 bool purespice_mouseMode(bool server)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -217,7 +217,7 @@ bool purespice_mouseMode(bool server)
 
 bool purespice_mousePosition(uint32_t x, uint32_t y)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -243,7 +243,7 @@ bool purespice_mousePosition(uint32_t x, uint32_t y)
 
 bool purespice_mouseMotion(int32_t x, int32_t y)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -329,7 +329,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
 
 bool purespice_mousePress(uint32_t button)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 
@@ -366,7 +366,7 @@ bool purespice_mousePress(uint32_t button)
 
 bool purespice_mouseRelease(uint32_t button)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_INPUTS];
   if (!channel->connected || !channel->ready)
     return false;
 

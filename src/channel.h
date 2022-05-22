@@ -19,19 +19,19 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "ps.h"
 
-PS_STATUS channel_connect   (struct PSChannel * channel);
+PS_STATUS channel_connect(PSChannel * channel);
 
-void      channel_disconnect(struct PSChannel * channel);
+void channel_disconnect(PSChannel * channel);
 
-PSHandlerFn channel_onMessage(struct PSChannel * channel);
+PSHandlerFn channel_onMessage(PSChannel * channel);
 
-bool channel_ack(struct PSChannel * channel);
+bool channel_ack(PSChannel * channel);
 
-ssize_t channel_writeNL(const struct PSChannel * channel,
+ssize_t channel_writeNL(const PSChannel * channel,
     const void * buffer, size_t size);
 
-PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
+PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
     size_t size, int * dataAvailable);
 
-PS_STATUS channel_discardNL(struct PSChannel * channel,
+PS_STATUS channel_discardNL(PSChannel * channel,
     size_t size, int * dataAvailable);

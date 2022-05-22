@@ -69,7 +69,7 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
   return &p.header;
 }
 
-static PS_STATUS onMessage_playbackStart(struct PSChannel * channel)
+static PS_STATUS onMessage_playbackStart(PSChannel * channel)
 {
   SpiceMsgPlaybackStart * msg = (SpiceMsgPlaybackStart *)channel->buffer;
 
@@ -81,7 +81,7 @@ static PS_STATUS onMessage_playbackStart(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_playbackData(struct PSChannel * channel)
+static PS_STATUS onMessage_playbackData(PSChannel * channel)
 {
   SpiceMsgPlaybackPacket * msg = (SpiceMsgPlaybackPacket *)channel->buffer;
 
@@ -89,14 +89,14 @@ static PS_STATUS onMessage_playbackData(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_playbackStop(struct PSChannel * channel)
+static PS_STATUS onMessage_playbackStop(PSChannel * channel)
 {
   (void)channel;
   g_ps.config.playback.stop();
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_playbackVolume(struct PSChannel * channel)
+static PS_STATUS onMessage_playbackVolume(PSChannel * channel)
 {
   SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
 
@@ -107,7 +107,7 @@ static PS_STATUS onMessage_playbackVolume(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_playbackMute(struct PSChannel * channel)
+static PS_STATUS onMessage_playbackMute(PSChannel * channel)
 {
   SpiceMsgAudioMute * msg = (SpiceMsgAudioMute *)channel->buffer;
 
@@ -115,7 +115,7 @@ static PS_STATUS onMessage_playbackMute(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-PSHandlerFn channelPlayback_onMessage(struct PSChannel * channel)
+PSHandlerFn channelPlayback_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
   switch(channel->header.type)

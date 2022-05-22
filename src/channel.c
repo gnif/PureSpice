@@ -43,7 +43,7 @@ static uint64_t get_timestamp(void)
   return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
 }
 
-PS_STATUS channel_connect(struct PSChannel * channel)
+PS_STATUS channel_connect(PSChannel * channel)
 {
   PS_STATUS status;
 
@@ -210,7 +210,7 @@ PS_STATUS channel_connect(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-void channel_disconnect(struct PSChannel * channel)
+void channel_disconnect(PSChannel * channel)
 {
   if (!channel->connected)
     return;
@@ -253,7 +253,7 @@ void channel_disconnect(struct PSChannel * channel)
   channel->buffer = NULL;
 }
 
-static PS_STATUS onMessage_setAck(struct PSChannel * channel)
+static PS_STATUS onMessage_setAck(PSChannel * channel)
 {
   SpiceMsgSetAck * msg = (SpiceMsgSetAck *)channel->buffer;
 
@@ -268,7 +268,7 @@ static PS_STATUS onMessage_setAck(struct PSChannel * channel)
     PS_STATUS_OK : PS_STATUS_ERROR;
 }
 
-static PS_STATUS onMessage_ping(struct PSChannel * channel)
+static PS_STATUS onMessage_ping(PSChannel * channel)
 {
   SpiceMsgPing * msg = (SpiceMsgPing *)channel->buffer;
 
@@ -286,14 +286,14 @@ static PS_STATUS onMessage_ping(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_disconnecting(struct PSChannel * channel)
+static PS_STATUS onMessage_disconnecting(PSChannel * channel)
 {
   shutdown(channel->socket, SHUT_WR);
   PS_LOG_INFO("Server sent disconnect message");
   return PS_STATUS_HANDLED;
 }
 
-static PS_STATUS onMessage_notify(struct PSChannel * channel)
+static PS_STATUS onMessage_notify(PSChannel * channel)
 {
   SpiceMsgNotify * msg = (SpiceMsgNotify *)channel->buffer;
 
@@ -301,7 +301,7 @@ static PS_STATUS onMessage_notify(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-PSHandlerFn channel_onMessage(struct PSChannel * channel)
+PSHandlerFn channel_onMessage(PSChannel * channel)
 {
   switch(channel->header.type)
   {
@@ -328,7 +328,7 @@ PSHandlerFn channel_onMessage(struct PSChannel * channel)
   return PS_HANDLER_ERROR;
 }
 
-bool channel_ack(struct PSChannel * channel)
+bool channel_ack(PSChannel * channel)
 {
   if (channel->ackFrequency == 0)
     return true;
@@ -349,7 +349,7 @@ bool channel_ack(struct PSChannel * channel)
   return true;
 }
 
-ssize_t channel_writeNL(const struct PSChannel * channel,
+ssize_t channel_writeNL(const PSChannel * channel,
     const void * buffer, size_t size)
 {
   if (!channel->connected)
@@ -361,7 +361,7 @@ ssize_t channel_writeNL(const struct PSChannel * channel,
   return send(channel->socket, buffer, size, 0);
 }
 
-PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
+PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
     size_t size, int * dataAvailable)
 {
   if (!channel->connected)
@@ -400,7 +400,7 @@ PS_STATUS channel_readNL(struct PSChannel * channel, void * buffer,
   return PS_STATUS_OK;
 }
 
-PS_STATUS channel_discardNL(struct PSChannel * channel,
+PS_STATUS channel_discardNL(PSChannel * channel,
     size_t size, int * dataAvailable)
 {
   uint8_t c[1024];

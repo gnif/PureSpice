@@ -74,7 +74,7 @@ const SpiceLinkHeader * channelDisplay_getConnectPacket(void)
   return &p.header;
 }
 
-PS_STATUS channelDisplay_onConnect(struct PSChannel * channel)
+PS_STATUS channelDisplay_onConnect(PSChannel * channel)
 {
   SpiceMsgcDisplayInit * msg =
     SPICE_PACKET(SPICE_MSGC_DISPLAY_INIT,
@@ -246,7 +246,7 @@ static void resolveDisplayDrawFill(uint8_t * data, SpiceMsgDisplayDrawFill * dst
   resolveSpiceFill  (data, &ptr, &dst->data);
 }
 
-static PS_STATUS onMessage_displaySurfaceCreate(struct PSChannel * channel)
+static PS_STATUS onMessage_displaySurfaceCreate(PSChannel * channel)
 {
   SpiceMsgSurfaceCreate * msg = (SpiceMsgSurfaceCreate *)channel->buffer;
 
@@ -271,7 +271,7 @@ static PS_STATUS onMessage_displaySurfaceCreate(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_displaySurfaceDestroy(struct PSChannel * channel)
+static PS_STATUS onMessage_displaySurfaceDestroy(PSChannel * channel)
 {
   SpiceMsgSurfaceDestroy * msg = (SpiceMsgSurfaceDestroy *)channel->buffer;
 
@@ -279,7 +279,7 @@ static PS_STATUS onMessage_displaySurfaceDestroy(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_displayDrawFill(struct PSChannel * channel)
+static PS_STATUS onMessage_displayDrawFill(PSChannel * channel)
 {
   SpiceMsgDisplayDrawFill dst;
   resolveDisplayDrawFill(channel->buffer, &dst);
@@ -300,7 +300,7 @@ static PS_STATUS onMessage_displayDrawFill(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_displayDrawCopy(struct PSChannel * channel)
+static PS_STATUS onMessage_displayDrawCopy(PSChannel * channel)
 {
   SpiceMsgDisplayDrawCopy dst;
   resolveDisplayDrawCopy(channel->buffer, &dst);
@@ -340,7 +340,7 @@ static PS_STATUS onMessage_displayDrawCopy(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-PSHandlerFn channelDisplay_onMessage(struct PSChannel * channel)
+PSHandlerFn channelDisplay_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
   switch(channel->header.type)

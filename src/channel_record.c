@@ -69,7 +69,7 @@ const SpiceLinkHeader * channelRecord_getConnectPacket(void)
   return &p.header;
 }
 
-static PS_STATUS onMessage_recordStart(struct PSChannel * channel)
+static PS_STATUS onMessage_recordStart(PSChannel * channel)
 {
   SpiceMsgRecordStart * msg = (SpiceMsgRecordStart *)channel->buffer;
 
@@ -81,7 +81,7 @@ static PS_STATUS onMessage_recordStart(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_recordStop(struct PSChannel * channel)
+static PS_STATUS onMessage_recordStop(PSChannel * channel)
 {
   (void)channel;
 
@@ -89,7 +89,7 @@ static PS_STATUS onMessage_recordStop(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_recordVolume(struct PSChannel * channel)
+static PS_STATUS onMessage_recordVolume(PSChannel * channel)
 {
   SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
 
@@ -100,7 +100,7 @@ static PS_STATUS onMessage_recordVolume(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static PS_STATUS onMessage_recordMute(struct PSChannel * channel)
+static PS_STATUS onMessage_recordMute(PSChannel * channel)
 {
   SpiceMsgAudioMute * msg = (SpiceMsgAudioMute *)channel->buffer;
 
@@ -108,7 +108,7 @@ static PS_STATUS onMessage_recordMute(struct PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-PSHandlerFn channelRecord_onMessage(struct PSChannel * channel)
+PSHandlerFn channelRecord_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
   switch(channel->header.type)
@@ -135,7 +135,7 @@ PSHandlerFn channelRecord_onMessage(struct PSChannel * channel)
 
 bool purespice_writeAudio(void * data, size_t size, uint32_t time)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_RECORD];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_RECORD];
   if (!channel->connected)
     return false;
 

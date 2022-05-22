@@ -38,6 +38,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include <spice/vd_agent.h>
 
+typedef struct PSAgent PSAgent;
+
 struct PSAgent
 {
   bool present;
@@ -57,7 +59,7 @@ struct PSAgent
   ssize_t msgSize;
 };
 
-static struct PSAgent agent = {0};
+static PSAgent agent = {0};
 
 static PS_STATUS agent_sendCaps(bool request);
 static void agent_onClipboard(void);
@@ -80,7 +82,7 @@ PS_STATUS agent_connect(void)
       SPICE_RAW_PACKET_FREE(msg);
   }
 
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
   memcpy(packet, &(uint32_t){SPICE_AGENT_TOKENS_MAX}, sizeof(uint32_t));
   if (!SPICE_SEND_PACKET(channel, packet))
@@ -136,7 +138,7 @@ struct Selection
 };
 #pragma pack(pop)
 
-PS_STATUS agent_process(struct PSChannel * channel)
+PS_STATUS agent_process(PSChannel * channel)
 {
   if (agent.cbRemain)
   {
@@ -297,7 +299,7 @@ void agent_setServerTokens(unsigned int tokens)
 
 static bool agent_takeServerToken(void)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
 
   unsigned int tokens;
   do
@@ -321,7 +323,7 @@ void agent_returnServerTokens(unsigned int tokens)
 
 bool agent_processQueue(void)
 {
-  struct PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
+  PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
 
   SPICE_LOCK(channel->lock);
   while (queue_peek(agent.queue, NULL) && agent_takeServerToken())

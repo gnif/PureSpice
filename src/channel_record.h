@@ -21,4 +21,4 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 const SpiceLinkHeader * channelRecord_getConnectPacket(void);
 
-PSHandlerFn channelRecord_onMessage(struct PSChannel * channel);
+PSHandlerFn channelRecord_onMessage(PSChannel * channel);

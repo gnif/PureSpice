@@ -45,7 +45,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include <spice/vd_agent.h>
 
 // globals
-struct PS g_ps =
+PS g_ps =
 {
   .channels =
   {
@@ -317,7 +317,7 @@ PSStatus purespice_process(int timeout)
       if (!events[i].data.ptr)
         continue;
 
-      struct PSChannel * channel = (struct PSChannel *)events[i].data.ptr;
+      PSChannel * channel = (PSChannel *)events[i].data.ptr;
 
       int dataAvailable;
       ioctl(channel->socket, FIONREAD, &dataAvailable);

@@ -124,8 +124,10 @@ typedef enum
 }
 PS_STATUS;
 
-struct PSChannel;
-typedef PS_STATUS (*PSHandlerFn)(struct PSChannel * channel);
+typedef struct PS        PS;
+typedef struct PSChannel PSChannel;
+
+typedef PS_STATUS (*PSHandlerFn)(PSChannel * channel);
 #define PS_HANDLER_DISCARD (PSHandlerFn)( 0)
 #define PS_HANDLER_ERROR   (PSHandlerFn)(-1)
 
@@ -149,8 +151,8 @@ struct PSChannel
   void (*setCaps)(
       const uint32_t * common , int numCommon,
       const uint32_t * channel, int numChannel);
-  PS_STATUS   (*onConnect)(struct PSChannel * channel);
-  PSHandlerFn (*onMessage)(struct PSChannel * channel);
+  PS_STATUS   (*onConnect)(PSChannel * channel);
+  PSHandlerFn (*onMessage)(PSChannel * channel);
 
   bool        connected;
   bool        ready;
@@ -184,7 +186,7 @@ struct PS
 
   bool   connected;
   int    epollfd;
-  struct PSChannel channels[PS_CHANNEL_MAX];
+  PSChannel channels[PS_CHANNEL_MAX];
   bool   channelsReady;
 
   struct
@@ -207,9 +209,9 @@ struct PS
   size_t    motionBufferSize;
 };
 
-extern struct PS g_ps;
+extern PS g_ps;
 
-PS_STATUS purespice_onCommonRead(struct PSChannel * channel,
+PS_STATUS purespice_onCommonRead(PSChannel * channel,
     SpiceMiniDataHeader * header, int * dataAvailable);
 
 #endif
