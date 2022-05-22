@@ -194,12 +194,21 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
 {
   SpiceMainChannelsList * msg = (SpiceMainChannelsList *)channel->buffer;
 
+  for(int n = 0; n < PS_CHANNEL_MAX; ++n)
+  {
+    struct PSChannel * ch = &g_ps.channels[n];
+    ch->available = false;
+  }
+
   for(size_t i = 0; i < msg->num_of_channels; ++i)
     for(int n = 0; n < PS_CHANNEL_MAX; ++n)
     {
       struct PSChannel * ch = &g_ps.channels[n];
-      if (ch->spiceType != msg->channels[i].type ||
-          (ch->enable && !*ch->enable))
+      if (ch->spiceType != msg->channels[i].type)
+       continue;
+
+      ch->available = true;
+      if ((ch->enable && !*ch->enable) || (ch->autoConnect && !*ch->autoConnect))
         continue;
 
       if (ch->connected)
@@ -210,16 +219,7 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
         return PS_STATUS_ERROR;
       }
 
-      PS_STATUS status;
-      if ((status = channel_connect(ch)) != PS_STATUS_OK)
-      {
-        purespice_disconnect();
-        PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-        return PS_STATUS_ERROR;
-      }
-
-      PS_LOG_INFO("%s channel connected", ch->name);
-      if (ch->onConnect && (status = ch->onConnect(ch)) != PS_STATUS_OK)
+      if (!ps_connectChannel(ch))
       {
         purespice_disconnect();
         PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);

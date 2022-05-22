@@ -311,6 +311,11 @@ int main(int argc, char * argv[])
     .port      = port,
     .password  = "",
     .ready     = connection_ready,
+    .inputs    =
+    {
+      .enable      = true,
+      .autoConnect = false
+    },
     .clipboard =
     {
       .enable  = false,
@@ -337,6 +342,7 @@ int main(int argc, char * argv[])
     },
     .display = {
       .enable         = true,
+      .autoConnect    = false,
       .surfaceCreate  = display_surfaceCreate,
       .surfaceDestroy = display_surfaceDestroy,
       .drawFill       = display_drawFill,
@@ -401,6 +407,16 @@ int main(int argc, char * argv[])
         goto exit;
 
       case ADL_EVENT_KEY_DOWN:
+        if (purespice_channelConnected(PS_CHANNEL_DISPLAY))
+        {
+          printf("Disconnect display\n");
+          purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+        }
+        else
+        {
+          printf("Connect display\n");
+          purespice_connectChannel(PS_CHANNEL_DISPLAY);
+        }
         break;
 
       case ADL_EVENT_KEY_UP:

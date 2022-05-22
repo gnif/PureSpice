@@ -61,6 +61,8 @@ PS g_ps =
     {
       .spiceType        = SPICE_CHANNEL_INPUTS,
       .name             = "INPUTS",
+      .enable           = &g_ps.config.inputs.enable,
+      .autoConnect      = &g_ps.config.inputs.autoConnect,
       .getConnectPacket = channelInputs_getConnectPacket,
       .onMessage        = channelInputs_onMessage
     },
@@ -69,6 +71,7 @@ PS g_ps =
       .spiceType        = SPICE_CHANNEL_PLAYBACK,
       .name             = "PLAYBACK",
       .enable           = &g_ps.config.playback.enable,
+      .autoConnect      = &g_ps.config.playback.autoConnect,
       .getConnectPacket = channelPlayback_getConnectPacket,
       .onMessage        = channelPlayback_onMessage
     },
@@ -77,6 +80,7 @@ PS g_ps =
       .spiceType        = SPICE_CHANNEL_RECORD,
       .name             = "RECORD",
       .enable           = &g_ps.config.record.enable,
+      .autoConnect      = &g_ps.config.record.autoConnect,
       .getConnectPacket = channelRecord_getConnectPacket,
       .onMessage        = channelRecord_onMessage,
     },
@@ -84,6 +88,7 @@ PS g_ps =
       .spiceType        = SPICE_CHANNEL_DISPLAY,
       .name             = "DISPLAY",
       .enable           = &g_ps.config.display.enable,
+      .autoConnect      = &g_ps.config.display.autoConnect,
       .getConnectPacket = channelDisplay_getConnectPacket,
       .onConnect        = channelDisplay_onConnect,
       .onMessage        = channelDisplay_onMessage
@@ -182,6 +187,33 @@ bool purespice_connect(const PSConfig * config)
     if (!g_ps.config.record.stop)
     {
       PS_LOG_ERROR("record->stop is mandatory");
+      goto err_config;
+    }
+  }
+
+  if (g_ps.config.display.enable)
+  {
+    if (!g_ps.config.display.surfaceCreate)
+    {
+      PS_LOG_ERROR("display->surfaceCreate is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.display.surfaceDestroy)
+    {
+      PS_LOG_ERROR("display->surfaceDestroy is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.display.drawBitmap)
+    {
+      PS_LOG_ERROR("display->drawBitmap is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.display.drawFill)
+    {
+      PS_LOG_ERROR("display->drawFill is mandatory");
       goto err_config;
     }
   }
@@ -485,8 +517,8 @@ PSStatus purespice_process(int timeout)
 
 done_disconnect:
       ++done;
-      channel->connected = false;
       events[i].data.ptr = NULL;
+      channel_disconnect(channel);
     }
   }
 
@@ -521,4 +553,119 @@ void purespice_freeServerInfo(PSServerInfo * info)
 
   if (info->name)
     free(info->name);
+}
+
+static uint8_t channelTypeToSpiceType(PSChannelType channel)
+{
+  switch(channel)
+  {
+    case PS_CHANNEL_MAIN:
+      return SPICE_CHANNEL_MAIN;
+
+    case PS_CHANNEL_INPUTS:
+      return SPICE_CHANNEL_INPUTS;
+
+    case PS_CHANNEL_PLAYBACK:
+      return SPICE_CHANNEL_PLAYBACK;
+
+    case PS_CHANNEL_RECORD:
+      return SPICE_CHANNEL_RECORD;
+
+    case PS_CHANNEL_DISPLAY:
+      return SPICE_CHANNEL_DISPLAY;
+
+    default:
+      PS_LOG_ERROR("Invalid channel");
+      return 255;
+  };
+
+  __builtin_unreachable();
+}
+
+static PSChannel * getChannel(PSChannelType channel)
+{
+  const uint8_t spiceType = channelTypeToSpiceType(channel);
+  if (spiceType == 255)
+    return NULL;
+
+  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+    if (g_ps.channels[i].spiceType == spiceType)
+      return &g_ps.channels[i];
+
+  __builtin_unreachable();
+}
+
+bool purespice_hasChannel(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return false;
+
+  return ch->available;
+}
+
+bool purespice_channelConnected(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return false;
+  return ch->connected;
+}
+
+PS_STATUS ps_connectChannel(PSChannel * ch)
+{
+  PS_STATUS status;
+  if ((status = channel_connect(ch)) != PS_STATUS_OK)
+  {
+    purespice_disconnect();
+    PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+    return status;
+  }
+
+  PS_LOG_INFO("%s channel connected", ch->name);
+  if (ch->onConnect && (status = ch->onConnect(ch)) != PS_STATUS_OK)
+  {
+    purespice_disconnect();
+    PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+    return status;
+  }
+
+  return PS_STATUS_OK;
+}
+
+bool purespice_connectChannel(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return false;
+
+  if (!ch->available)
+  {
+    PS_LOG_ERROR("%s: Channel is not availble", ch->name);
+    return false;
+  }
+
+  if (ch->connected)
+    return true;
+
+  return ps_connectChannel(ch) == PS_STATUS_OK;
+}
+
+bool purespice_disconnectChannel(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return false;
+
+  if (!ch->available)
+  {
+    PS_LOG_ERROR("%s: Channel is not availble", ch->name);
+    return false;
+  }
+
+  if (!ch->connected)
+    return true;
+
+  channel_disconnect(ch);
+  return true;
 }

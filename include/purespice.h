@@ -59,6 +59,18 @@ typedef struct PSServerInfo
 }
 PSServerInfo;
 
+typedef enum PSChannelType
+{
+  PS_CHANNEL_MAIN,
+  PS_CHANNEL_INPUTS,
+  PS_CHANNEL_PLAYBACK,
+  PS_CHANNEL_RECORD,
+  PS_CHANNEL_DISPLAY,
+
+  PS_CHANNEL_MAX
+}
+PSChannelType;
+
 typedef enum PSSurfaceFormat
 {
   PS_SURFACE_FMT_1_A,
@@ -129,6 +141,16 @@ typedef struct PSConfig
 
   struct
   {
+    /* enable input support if available */
+    bool enable;
+
+    /* automatically connect to the channel as soon as it's available */
+    bool autoConnect;
+  }
+  inputs;
+
+  struct
+  {
     /* enable clipboard support if available */
     bool enable;
 
@@ -150,6 +172,9 @@ typedef struct PSConfig
   {
     /* enable the playback channel if available */
     bool enable;
+
+    /* automatically connect to the channel as soon as it's available */
+    bool autoConnect;
 
     /* called with the details of the stream to open */
     void (*start)(int channels, int sampleRate, PSAudioFormat format,
@@ -174,6 +199,9 @@ typedef struct PSConfig
     /* enable the playback channel if available */
     bool enable;
 
+    /* automatically connect to the channel as soon as it's available */
+    bool autoConnect;
+
     /* called with the details of the stream to open */
     void (*start)(int channels, int sampleRate, PSAudioFormat format);
 
@@ -192,6 +220,9 @@ typedef struct PSConfig
   {
     /* enable the display channel if available */
     bool enable;
+
+    /* automatically connect to the channel as soon as it's available */
+    bool autoConnect;
 
     /* called to create a new surface */
     void (*surfaceCreate)(unsigned int surfaceId, PSSurfaceFormat format,
@@ -238,6 +269,11 @@ PSStatus purespice_process(int timeout);
 
 bool purespice_getServerInfo(PSServerInfo * info);
 void purespice_freeServerInfo(PSServerInfo * info);
+
+bool purespice_hasChannel       (PSChannelType channel);
+bool purespice_channelConnected (PSChannelType channel);
+bool purespice_connectChannel   (PSChannelType channel);
+bool purespice_disconnectChannel(PSChannelType channel);
 
 bool purespice_keyDown      (uint32_t code);
 bool purespice_keyUp        (uint32_t code);

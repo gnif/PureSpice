@@ -251,6 +251,7 @@ void channel_disconnect(PSChannel * channel)
   channel->bufferSize = 0;
   free(channel->buffer);
   channel->buffer = NULL;
+  channel->connected = false;
 }
 
 static PS_STATUS onMessage_setAck(PSChannel * channel)

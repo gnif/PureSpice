@@ -105,18 +105,6 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 typedef enum
 {
-  PS_CHANNEL_MAIN,
-  PS_CHANNEL_INPUTS,
-  PS_CHANNEL_PLAYBACK,
-  PS_CHANNEL_RECORD,
-  PS_CHANNEL_DISPLAY,
-
-  PS_CHANNEL_MAX
-}
-PSChannel;
-
-typedef enum
-{
   PS_STATUS_OK,
   PS_STATUS_HANDLED,
   PS_STATUS_NODATA,
@@ -136,7 +124,9 @@ struct PSChannel
 {
   uint8_t      spiceType;
   const char * name;
+  bool         available;
   bool       * enable;
+  bool       * autoConnect;
 
   SpiceMiniDataHeader header;
   unsigned int headerRead;
@@ -210,6 +200,8 @@ struct PS
 };
 
 extern PS g_ps;
+
+PS_STATUS ps_connectChannel(PSChannel * ch);
 
 PS_STATUS purespice_onCommonRead(PSChannel * channel,
     SpiceMiniDataHeader * header, int * dataAvailable);
