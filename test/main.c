@@ -152,6 +152,28 @@ static void connection_ready(void)
 FILE * fp = NULL;
 int dispWidth, dispHeight;
 
+typedef struct __attribute((packed))__
+{
+  uint16_t  type;             // Magic identifier: 0x4d42
+  uint32_t  size;             // File size in bytes
+  uint16_t  reserved1;        // Not used
+  uint16_t  reserved2;        // Not used
+  uint32_t  offset;           // Offset to image data in bytes from beginning of file (54 bytes)
+  uint32_t  dib_header_size;  // DIB Header size in bytes (40 bytes)
+  int32_t   width_px;         // Width of the image
+  int32_t   height_px;        // Height of image
+  uint16_t  num_planes;       // Number of color planes
+  uint16_t  bits_per_pixel;   // Bits per pixel
+  uint32_t  compression;      // Compression type
+  uint32_t  image_size_bytes; // Image size in bytes
+  int32_t   x_resolution_ppm; // Pixels per meter
+  int32_t   y_resolution_ppm; // Pixels per meter
+  uint32_t  num_colors;       // Number of colors
+  uint32_t  important_colors; // Important colors
+}
+BMPHeader;
+
+
 static void display_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
     unsigned int width, unsigned int height)
 {
@@ -161,6 +183,24 @@ static void display_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format
   dispWidth  = width;
   dispHeight = height;
   fp = fopen("/tmp/dump.bmp", "wb");
+  fseek(fp, 0, SEEK_SET);
+
+  BMPHeader h =
+  {
+    .type             = 0x4d42,
+    .size             = sizeof(BMPHeader) + height * width * 4,
+    .offset           = sizeof(BMPHeader),
+    .dib_header_size  = 40,
+    .width_px         = width,
+    .height_px        = height,
+    .num_planes       = 1,
+    .bits_per_pixel   = 32,
+    .image_size_bytes = height * width * 4,
+    .x_resolution_ppm = 0,
+    .y_resolution_ppm = 0,
+  };
+
+  fwrite(&h, sizeof(h), 1, fp);
 }
 
 static void display_surfaceDestroy(unsigned int surfaceId)
@@ -193,77 +233,27 @@ static void display_drawBitmap(unsigned int surfaceId,
     int stride,
     void * data)
 {
-  typedef struct __attribute((packed))__
+  if (topDown)
   {
-    uint16_t  type;             // Magic identifier: 0x4d42
-    uint32_t  size;             // File size in bytes
-    uint16_t  reserved1;        // Not used
-    uint16_t  reserved2;        // Not used
-    uint32_t  offset;           // Offset to image data in bytes from beginning of file (54 bytes)
-    uint32_t  dib_header_size;  // DIB Header size in bytes (40 bytes)
-    int32_t   width_px;         // Width of the image
-    int32_t   height_px;        // Height of image
-    uint16_t  num_planes;       // Number of color planes
-    uint16_t  bits_per_pixel;   // Bits per pixel
-    uint32_t  compression;      // Compression type
-    uint32_t  image_size_bytes; // Image size in bytes
-    int32_t   x_resolution_ppm; // Pixels per meter
-    int32_t   y_resolution_ppm; // Pixels per meter
-    uint32_t  num_colors;       // Number of colors
-    uint32_t  important_colors; // Important colors
-  }
-  BMPHeader;
-
-  if (x == 0 && y == 0)
-  {
-    fseek(fp, 0, SEEK_SET);
-    BMPHeader h =
+    uint8_t * src = (uint8_t *)data;
+    for(int i = 0; i < height; ++i)
     {
-      .type             = 0x4d42,
-      .size             = sizeof(BMPHeader) + height * stride,
-      .offset           = sizeof(BMPHeader),
-      .dib_header_size  = 40,
-      .width_px         = width,
-      .height_px        = height,
-      .num_planes       = 1,
-      .bits_per_pixel   = 32,
-      .image_size_bytes = height * stride,
-      .x_resolution_ppm = 0,
-      .y_resolution_ppm = 0,
-    };
-
-    fwrite(&h, sizeof(h), 1, fp);
-    if (topDown)
-    {
-      uint8_t * src = (uint8_t *)data + stride * height;
-      for(int i = 0; i < height; ++i)
-      {
-        src -= stride;
-        fwrite(src, stride, 1, fp);
-      }
+      int dst = (dispWidth * 4 * (dispHeight-(y+i))) + x * 4;
+      fseek(fp, sizeof(BMPHeader) + dst, SEEK_SET);
+      fwrite(src, stride, 1, fp);
+      src += stride;
     }
-    else
-      fwrite(data, stride, height, fp);
   }
   else
   {
-    uint8_t * src = (uint8_t *)data;
-    if (topDown)
-      for(int i = 0; i < height; ++i)
-      {
-        int dst = (dispWidth * 4 * (dispHeight-(y+i))) + x * 4;
-        fseek(fp, sizeof(BMPHeader) + dst, SEEK_SET);
-        fwrite(src, stride, 1, fp);
-        src += stride;
-      }
-    else
-      for(int i = 0; i < height; ++i)
-      {
-        int dst = (dispWidth * 4 * (y+i)) + x * 4;
-        fseek(fp, sizeof(BMPHeader) + dst, SEEK_SET);
-        fwrite(src, stride, 1, fp);
-        src += stride;
-      }
+    uint8_t * src = (uint8_t *)data + height * stride;
+    for(int i = 0; i < height; ++i)
+    {
+      int dst = (dispWidth * 4 * (dispHeight-(y+i))) + x * 4;
+      fseek(fp, sizeof(BMPHeader) + dst, SEEK_SET);
+      src -= stride;
+      fwrite(src, stride, 1, fp);
+    }
   }
   fflush(fp);
 }
