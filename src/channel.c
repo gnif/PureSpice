@@ -254,6 +254,8 @@ void channel_internal_disconnect(PSChannel * channel)
   channel->buffer = NULL;
   channel->connected = false;
   channel->doDisconnect = false;
+
+  PS_LOG_INFO("%s channel disconnected", channel->name);
 }
 
 void channel_disconnect(PSChannel * channel)
@@ -269,7 +271,6 @@ static PS_STATUS onMessage_setAck(PSChannel * channel)
   SpiceMsgSetAck * msg = (SpiceMsgSetAck *)channel->buffer;
 
   channel->ackFrequency = msg->window;
-  PS_LOG_INFO("%s ackFrequency: %d", channel->name, channel->ackFrequency);
 
   SpiceMsgcAckSync * out =
     SPICE_PACKET(SPICE_MSGC_ACK_SYNC, SpiceMsgcAckSync, 0);

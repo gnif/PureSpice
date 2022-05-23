@@ -323,6 +323,11 @@ PSStatus purespice_process(int timeout)
 {
   static struct epoll_event events[PS_CHANNEL_MAX];
 
+  // check for pending disconnects
+  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+    if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
+      channel_internal_disconnect(&g_ps.channels[i]);
+
   int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
   if (nfds == 0 || (nfds < 0 && errno == EINTR))
     return PS_STATUS_RUN;
@@ -521,11 +526,6 @@ done_disconnect:
       channel_internal_disconnect(channel);
     }
   }
-
-  // check for pending disconnects
-  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
-    if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
-      channel_internal_disconnect(&g_ps.channels[i]);
 
   for(int i = 0; i < PS_CHANNEL_MAX; ++i)
     if (g_ps.channels[i].connected)
