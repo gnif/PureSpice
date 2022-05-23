@@ -21,6 +21,8 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 
 PS_STATUS channel_connect(PSChannel * channel);
 
+void channel_internal_disconnect(PSChannel * channel);
+
 void channel_disconnect(PSChannel * channel);
 
 PSHandlerFn channel_onMessage(PSChannel * channel);

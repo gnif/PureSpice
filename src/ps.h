@@ -146,6 +146,7 @@ struct PSChannel
 
   bool        connected;
   bool        ready;
+  bool        doDisconnect;
   bool        initDone;
   int         socket;
   uint32_t    ackFrequency;

@@ -285,7 +285,7 @@ void purespice_disconnect()
   g_ps.connected = false;
 
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
-    channel_disconnect(&g_ps.channels[i]);
+    channel_internal_disconnect(&g_ps.channels[i]);
 
   close(g_ps.epollfd);
 
@@ -518,9 +518,14 @@ PSStatus purespice_process(int timeout)
 done_disconnect:
       ++done;
       events[i].data.ptr = NULL;
-      channel_disconnect(channel);
+      channel_internal_disconnect(channel);
     }
   }
+
+  // check for pending disconnects
+  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+    if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
+      channel_internal_disconnect(&g_ps.channels[i]);
 
   for(int i = 0; i < PS_CHANNEL_MAX; ++i)
     if (g_ps.channels[i].connected)

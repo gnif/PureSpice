@@ -47,6 +47,7 @@ PS_STATUS channel_connect(PSChannel * channel)
 {
   PS_STATUS status;
 
+  channel->doDisconnect = false;
   channel->initDone     = false;
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
@@ -102,7 +103,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   const SpiceLinkHeader * p = channel->getConnectPacket();
   if ((size_t)channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
@@ -111,7 +112,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, &header, sizeof(header),
           NULL)) != PS_STATUS_OK)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to read the reply to the connect packet");
     return status;
   }
@@ -119,14 +120,14 @@ PS_STATUS channel_connect(PSChannel * channel)
   if (header.magic         != SPICE_MAGIC ||
       header.major_version != SPICE_VERSION_MAJOR)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
   if (header.size < sizeof(SpiceLinkReply))
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
     return PS_STATUS_ERROR;
   }
@@ -135,13 +136,13 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, reply, header.size,
           NULL)) != PS_STATUS_OK)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     return status;
   }
 
   if (reply->error != SPICE_LINK_ERR_OK)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Server reported link error: %d", reply->error);
     return PS_STATUS_ERROR;
   }
@@ -160,7 +161,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
   if (channel_writeNL(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to write the auth mechanisim packet");
     return PS_STATUS_ERROR;
   }
@@ -168,7 +169,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   PSPassword pass;
   if (!rsa_encryptPassword(reply->pub_key, g_ps.config.password, &pass))
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to encrypt the password");
     return PS_STATUS_ERROR;
   }
@@ -176,7 +177,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   if (channel_writeNL(channel, pass.data, pass.size) != pass.size)
   {
     rsa_freePassword(&pass);
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
@@ -187,14 +188,14 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, &linkResult, sizeof(linkResult),
           NULL)) != PS_STATUS_OK)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Failed to read the authentication response");
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
-    channel_disconnect(channel);
+    channel_internal_disconnect(channel);
     PS_LOG_ERROR("Server reported link error: %u", linkResult);
     return PS_STATUS_ERROR;
   }
@@ -210,7 +211,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-void channel_disconnect(PSChannel * channel)
+void channel_internal_disconnect(PSChannel * channel)
 {
   if (!channel->connected)
     return;
@@ -252,6 +253,15 @@ void channel_disconnect(PSChannel * channel)
   free(channel->buffer);
   channel->buffer = NULL;
   channel->connected = false;
+  channel->doDisconnect = false;
+}
+
+void channel_disconnect(PSChannel * channel)
+{
+  if (!channel->connected)
+    return;
+
+  channel->doDisconnect = true;
 }
 
 static PS_STATUS onMessage_setAck(PSChannel * channel)
