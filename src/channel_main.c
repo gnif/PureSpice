@@ -33,6 +33,7 @@ struct ChannelMain
   bool capNameAndUUID;
   bool hasName;
   bool hasUUID;
+  bool hasList;
 };
 
 static struct ChannelMain cm = { 0 };
@@ -115,6 +116,9 @@ static void checkReady(void)
     if (!cm.hasName || !cm.hasUUID)
       return;
   }
+
+  if (!cm.hasList)
+    return;
 
   cm.ready = true;
   if (g_ps.config.ready)
@@ -230,6 +234,7 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
       break;
     }
 
+  cm.hasList = true;
   checkReady();
   return PS_STATUS_OK;
 }
