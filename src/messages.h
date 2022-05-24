@@ -213,6 +213,12 @@ typedef struct SpiceMsgcDisplayInit
 }
 SpiceMsgcDisplayInit;
 
+typedef struct SpiceMsgcPreferredCompression
+{
+  uint8_t image_compression;
+}
+SpiceMsgcPreferredCompression;
+
 typedef struct SpiceMsgSurfaceCreate
 {
   uint32_t surface_id;

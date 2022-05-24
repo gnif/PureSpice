@@ -64,27 +64,37 @@ const SpiceLinkHeader * channelDisplay_getConnectPacket(void)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_SIZED_STREAM);
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_STREAM_REPORT);
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_MONITORS_CONFIG);
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_MULTI_CODEC);
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_LZ4_COMPRESSION);
-//  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_PREF_COMPRESSION);
+  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_PREF_COMPRESSION);
 
   return &p.header;
 }
 
 PS_STATUS channelDisplay_onConnect(PSChannel * channel)
 {
-  SpiceMsgcDisplayInit * msg =
-    SPICE_PACKET(SPICE_MSGC_DISPLAY_INIT,
-        SpiceMsgcDisplayInit, 0);
-
-  memset(msg, 0, sizeof(*msg));
-  if (!SPICE_SEND_PACKET(channel, msg))
   {
-    PS_LOG_ERROR("Failed to send SpiceMsgcDisplayInit");
-    return PS_STATUS_ERROR;
+    SpiceMsgcDisplayInit * msg =
+      SPICE_PACKET(SPICE_MSGC_DISPLAY_INIT,
+          SpiceMsgcDisplayInit, 0);
+
+    memset(msg, 0, sizeof(*msg));
+    if (!SPICE_SEND_PACKET(channel, msg))
+    {
+      PS_LOG_ERROR("Failed to send SpiceMsgcDisplayInit");
+      return PS_STATUS_ERROR;
+    }
+  }
+
+  {
+    SpiceMsgcPreferredCompression * msg =
+      SPICE_PACKET(SPICE_MSGC_DISPLAY_PREFERRED_COMPRESSION,
+          SpiceMsgcPreferredCompression, 0);
+
+    msg->image_compression = SPICE_IMAGE_COMPRESSION_OFF;
+    if (!SPICE_SEND_PACKET(channel, msg))
+    {
+      PS_LOG_ERROR("Failed to send SpiceMsgcPreferredCompression");
+      return PS_STATUS_ERROR;
+    }
   }
 
   return PS_STATUS_OK;
