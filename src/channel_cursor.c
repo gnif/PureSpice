@@ -216,6 +216,30 @@ static PS_STATUS onMessage_cursorTrail(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
+static PS_STATUS onMessage_cursorInvalOne(PSChannel * channel)
+{
+  SpiceMsgCursorInvalOne * msg = (SpiceMsgCursorInvalOne *)channel->buffer;
+
+  struct PSCursorImage ** prev = &g_ps.cursor.cache;
+  struct PSCursorImage  * node = g_ps.cursor.cache;
+
+  while (node)
+  {
+    if (node->header.unique == msg->cursor_id)
+    {
+      *prev = node->next;
+      if (!node->next)
+        g_ps.cursor.cacheLast = prev;
+      break;
+    }
+
+    prev = &node->next;
+    node = node->next;
+  }
+
+  return PS_STATUS_OK;
+}
+
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
@@ -238,6 +262,9 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_TRAIL:
       return onMessage_cursorTrail;
+
+    case SPICE_MSG_CURSOR_INVAL_ONE:
+      return onMessage_cursorInvalOne;
   }
 
   return PS_HANDLER_DISCARD;
