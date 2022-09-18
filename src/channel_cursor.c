@@ -24,7 +24,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "channel.h"
 #include "channel_cursor.h"
 
-#include <stdio.h>
+#include <stdlib.h>
 
 #include "messages.h"
 
@@ -68,13 +68,84 @@ const SpiceLinkHeader * channelCursor_getConnectPacket(void)
   return &p.header;
 }
 
+static size_t cursorBufferSize(SpiceCursorHeader * header)
+{
+  switch (header->type)
+  {
+    case SPICE_CURSOR_TYPE_ALPHA:
+      return header->width * header->height * 4;
+
+    case SPICE_CURSOR_TYPE_MONO:
+      return (header->width + 7) / 8 * header->height * 2;
+
+    case SPICE_CURSOR_TYPE_COLOR4:
+      return (header->width + 1) / 2 * header->height + 16 * sizeof(uint32_t) +
+        (header->width + 7) / 8 * header->height;
+
+    case SPICE_CURSOR_TYPE_COLOR8:
+      return header->width * header->height + 256 * sizeof(uint32_t) +
+        (header->width + 7) / 8 * header->height;
+
+    case SPICE_CURSOR_TYPE_COLOR16:
+      return header->width * header->height * 2 +
+        (header->width + 7) / 8 * header->height;
+
+    case SPICE_CURSOR_TYPE_COLOR24:
+      return header->width * header->height * 3 +
+        (header->width + 7) / 8 * header->height;
+
+    case SPICE_CURSOR_TYPE_COLOR32:
+      return header->width * header->height * 4 +
+        (header->width + 7) / 8 * header->height;
+  }
+
+  return 0;
+}
+
+static struct PSCursorImage * loadCursor(uint64_t id)
+{
+  for (struct PSCursorImage * node = g_ps.cursor.cache; node; node = node->next)
+    if (node->header.unique == id)
+      return node;
+
+  return NULL;
+}
+
+static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
+{
+  if (cursor->flags & SPICE_CURSOR_FLAGS_FROM_CACHE)
+    return loadCursor(cursor->header.unique);
+
+  size_t bufferSize = cursorBufferSize(&cursor->header);
+  struct PSCursorImage * node = malloc(sizeof(struct PSCursorImage) + bufferSize);
+
+  node->cached = cursor->flags & SPICE_CURSOR_FLAGS_CACHE_ME;
+  memcpy(&node->header, &cursor->header, sizeof(node->header));
+  memcpy(node->buffer, cursor->data, bufferSize);
+
+  if (node->cached)
+  {
+    node->next             = NULL;
+    *g_ps.cursor.cacheLast = node;
+    g_ps.cursor.cacheLast  = &node->next;
+  }
+
+  return node;
+}
+
 static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 {
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
 
-  g_ps.cursor.x       = msg->position.x;
-  g_ps.cursor.y       = msg->position.y;
-  g_ps.cursor.visible = msg->visible;
+  g_ps.cursor.x         = msg->position.x;
+  g_ps.cursor.y         = msg->position.y;
+  g_ps.cursor.visible   = msg->visible;
+  g_ps.cursor.trailLen  = msg->trail_length;
+  g_ps.cursor.trailFreq = msg->trail_frequency;
+
+  g_ps.cursor.cache     = NULL;
+  g_ps.cursor.cacheLast = &g_ps.cursor.cache;
+  g_ps.cursor.current   = convertCursor(&msg->cursor);
 
   return PS_STATUS_OK;
 }

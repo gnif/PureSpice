@@ -66,6 +66,7 @@ typedef enum PSChannelType
   PS_CHANNEL_PLAYBACK,
   PS_CHANNEL_RECORD,
   PS_CHANNEL_DISPLAY,
+  PS_CHANNEL_CURSOR,
 
   PS_CHANNEL_MAX
 }
@@ -247,6 +248,16 @@ typedef struct PSConfig
         uint32_t color);
   }
   display;
+
+  struct
+  {
+    /* enable the cursor channel if available */
+    bool enable;
+
+    /* automatically connect to the channel as soon as it's available */
+    bool autoConnect;
+  }
+  cursor;
 }
 PSConfig;
 
