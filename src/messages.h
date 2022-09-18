@@ -257,6 +257,62 @@ typedef struct SpiceMsgDisplayDrawCopy
 }
 SpiceMsgDisplayDrawCopy;
 
+typedef struct SpiceCursorHeader
+{
+  uint64_t unique;
+  uint8_t type;
+  uint16_t width;
+  uint16_t height;
+  uint16_t hot_spot_x;
+  uint16_t hot_spot_y;
+}
+SpiceCursorHeader;
+
+typedef struct SpiceCursor
+{
+  uint16_t          flags;
+  SpiceCursorHeader header;
+  uint8_t           data[];
+}
+SpiceCursor;
+
+typedef struct SpiceMsgCursorInit
+{
+  SpicePoint16 position;
+  uint16_t     trail_length;
+  uint16_t     trail_frequency;
+  uint8_t      visible;
+  SpiceCursor  cursor;
+}
+SpiceMsgCursorInit;
+
+typedef struct SpiceMsgCursorSet
+{
+  SpicePoint16 position;
+  uint8_t      visible;
+  SpiceCursor  cursor;
+}
+SpiceMsgCursorSet;
+
+typedef struct SpiceMsgCursorMove
+{
+  SpicePoint16 position;
+}
+SpiceMsgCursorMove;
+
+typedef struct SpiceMsgCursorTrail
+{
+  uint16_t     length;
+  uint16_t     frequency;
+}
+SpiceMsgCursorTrail;
+
+typedef struct SpiceMsgCursorInvalOne
+{
+  uint64_t cursor_id;
+}
+SpiceMsgCursorInvalOne;
+
 // spice is missing these defines, the offical reference library incorrectly
 // uses the VD defines
 
@@ -283,6 +339,9 @@ SpiceMsgDisplayDrawCopy;
 
 #define DISPLAY_CAPS_BYTES (((SPICE_DISPLAY_CAP_CODEC_H265 + 32) / 8) & ~3)
 #define DISPLAY_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
+
+#define CURSOR_CAPS_BYTES (0)
+#define CUSROR_SET_CAPABILITY(caps, index) _SET_CAPABILITY(caps, index)
 
 #pragma pack(pop)
 
