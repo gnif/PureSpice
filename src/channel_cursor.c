@@ -133,6 +133,20 @@ static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
   return node;
 }
 
+static void clearCursorCache(void)
+{
+  struct PSCursorImage * node;
+  struct PSCursorImage * next;
+  for (node = g_ps.cursor.cache; node; node = next)
+  {
+    next = node->next;
+    free(node);
+  }
+
+  g_ps.cursor.cache     = NULL;
+  g_ps.cursor.cacheLast = &g_ps.cursor.cache;
+}
+
 static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 {
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
@@ -165,8 +179,7 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
     free(node);
   }
 
-  g_ps.cursor.cache     = NULL;
-  g_ps.cursor.cacheLast = NULL;
+  clearCursorCache();
 
   return PS_STATUS_OK;
 }
@@ -240,6 +253,15 @@ static PS_STATUS onMessage_cursorInvalOne(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
+static PS_STATUS onMessage_cursorInvalAll(PSChannel * channel)
+{
+  (void) channel;
+
+  clearCursorCache();
+
+  return PS_STATUS_OK;
+}
+
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
@@ -265,6 +287,9 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_INVAL_ONE:
       return onMessage_cursorInvalOne;
+
+    case SPICE_MSG_CURSOR_INVAL_ALL:
+      return onMessage_cursorInvalAll;
   }
 
   return PS_HANDLER_DISCARD;
