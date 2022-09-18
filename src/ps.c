@@ -28,6 +28,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "channel_playback.h"
 #include "channel_record.h"
 #include "channel_display.h"
+#include "channel_cursor.h"
 
 #include "messages.h"
 #include "rsa.h"
@@ -84,6 +85,7 @@ PS g_ps =
       .getConnectPacket = channelRecord_getConnectPacket,
       .onMessage        = channelRecord_onMessage,
     },
+    // PS_CHANNEL_DISPLAY
     {
       .spiceType        = SPICE_CHANNEL_DISPLAY,
       .name             = "DISPLAY",
@@ -92,6 +94,15 @@ PS g_ps =
       .getConnectPacket = channelDisplay_getConnectPacket,
       .onConnect        = channelDisplay_onConnect,
       .onMessage        = channelDisplay_onMessage
+    },
+    // PS_CHANNEL_CURSOR
+    {
+      .spiceType        = SPICE_CHANNEL_CURSOR,
+      .name             = "CURSOR",
+      .enable           = &g_ps.config.cursor.enable,
+      .autoConnect      = &g_ps.config.cursor.autoConnect,
+      .getConnectPacket = channelCursor_getConnectPacket,
+      .onMessage        = channelCursor_onMessage
     }
   }
 };
@@ -578,6 +589,9 @@ static uint8_t channelTypeToSpiceType(PSChannelType channel)
 
     case PS_CHANNEL_DISPLAY:
       return SPICE_CHANNEL_DISPLAY;
+
+    case PS_CHANNEL_CURSOR:
+      return SPICE_CHANNEL_CURSOR;
 
     default:
       PS_LOG_ERROR("Invalid channel");

@@ -23,6 +23,7 @@ Place, Suite 330, Boston, MA 02111-1307 USA
 #include "purespice.h"
 
 #include "locking.h"
+#include "messages.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -154,6 +155,14 @@ struct PSChannel
   atomic_flag lock;
 };
 
+struct PSCursorImage
+{
+  struct PSCursorImage * next;
+  bool                   cached;
+  SpiceCursorHeader      header;
+  uint8_t                buffer[];
+};
+
 struct PS
 {
   bool     initialized;
@@ -195,6 +204,17 @@ struct PS
     int rpos, wpos;
   }
   mouse;
+
+  struct
+  {
+    uint16_t                x, y;
+    uint16_t                trailLen, trailFreq;
+    bool                    visible;
+    struct PSCursorImage  * cache;
+    struct PSCursorImage ** cacheLast;
+    struct PSCursorImage  * current;
+  }
+  cursor;
 
   uint8_t * motionBuffer;
   size_t    motionBufferSize;
