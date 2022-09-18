@@ -206,6 +206,16 @@ static PS_STATUS onMessage_cursorHide(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
+static PS_STATUS onMessage_cursorTrail(PSChannel * channel)
+{
+  SpiceMsgCursorTrail * msg = (SpiceMsgCursorTrail *)channel->buffer;
+
+  g_ps.cursor.trailLen  = msg->length;
+  g_ps.cursor.trailFreq = msg->frequency;
+
+  return PS_STATUS_OK;
+}
+
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
@@ -225,6 +235,9 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_HIDE:
       return onMessage_cursorHide;
+
+    case SPICE_MSG_CURSOR_TRAIL:
+      return onMessage_cursorTrail;
   }
 
   return PS_HANDLER_DISCARD;
