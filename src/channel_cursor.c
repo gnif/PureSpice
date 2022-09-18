@@ -197,6 +197,15 @@ static PS_STATUS onMessage_cursorMove(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
+static PS_STATUS onMessage_cursorHide(PSChannel * channel)
+{
+  (void) channel;
+
+  g_ps.cursor.visible = false;
+
+  return PS_STATUS_OK;
+}
+
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
@@ -213,6 +222,9 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_MOVE:
       return onMessage_cursorMove;
+
+    case SPICE_MSG_CURSOR_HIDE:
+      return onMessage_cursorHide;
   }
 
   return PS_HANDLER_DISCARD;
