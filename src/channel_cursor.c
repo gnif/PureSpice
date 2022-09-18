@@ -171,6 +171,22 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
+static PS_STATUS onMessage_cursorSet(PSChannel * channel)
+{
+  SpiceMsgCursorSet * msg = (SpiceMsgCursorSet *)channel->buffer;
+
+  g_ps.cursor.x       = msg->position.x;
+  g_ps.cursor.y       = msg->position.y;
+  g_ps.cursor.visible = msg->visible;
+
+  if (g_ps.cursor.current && !g_ps.cursor.current->cached)
+    free(g_ps.cursor.current);
+
+  g_ps.cursor.current = convertCursor(&msg->cursor);
+
+  return PS_STATUS_OK;
+}
+
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
   channel->initDone = true;
@@ -181,6 +197,9 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_RESET:
       return onMessage_cursorReset;
+
+    case SPICE_MSG_CURSOR_SET:
+      return onMessage_cursorSet;
   }
 
   return PS_HANDLER_DISCARD;
