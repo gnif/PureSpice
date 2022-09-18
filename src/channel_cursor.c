@@ -147,6 +147,59 @@ static void clearCursorCache(void)
   g_ps.cursor.cacheLast = &g_ps.cursor.cache;
 }
 
+static void updateCursorImage(void)
+{
+  if (!g_ps.cursor.current)
+    return;
+
+  switch (g_ps.cursor.current->header.type)
+  {
+    case SPICE_CURSOR_TYPE_ALPHA:
+      g_ps.config.cursor.setRGBAImage(
+        g_ps.cursor.current->header.width,
+        g_ps.cursor.current->header.height,
+        g_ps.cursor.current->header.hot_spot_x,
+        g_ps.cursor.current->header.hot_spot_y,
+        g_ps.cursor.current->buffer
+      );
+      break;
+
+    case SPICE_CURSOR_TYPE_MONO:
+    {
+      size_t size = (g_ps.cursor.current->header.width + 7) / 8 *
+        g_ps.cursor.current->header.height;
+
+      const uint8_t * xorBuffer = g_ps.cursor.current->buffer;
+      const uint8_t * andBuffer = xorBuffer + size;
+
+      g_ps.config.cursor.setMonoImage(
+        g_ps.cursor.current->header.width,
+        g_ps.cursor.current->header.height,
+        g_ps.cursor.current->header.hot_spot_x,
+        g_ps.cursor.current->header.hot_spot_y,
+        xorBuffer,
+        andBuffer
+      );
+      break;
+    }
+
+    default:
+      PS_LOG_ERROR("Attempt to use unsupported cursor type: %d",
+        g_ps.cursor.current->header.type);
+  }
+}
+
+static void updateCursorStatus(void)
+{
+  g_ps.config.cursor.setState(g_ps.cursor.visible, g_ps.cursor.x, g_ps.cursor.y);
+}
+
+static void updateCursorTrail(void)
+{
+  if (g_ps.config.cursor.setTrail)
+    g_ps.config.cursor.setTrail(g_ps.cursor.trailLen, g_ps.cursor.trailFreq);
+}
+
 static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 {
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
@@ -160,6 +213,10 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
   g_ps.cursor.cache     = NULL;
   g_ps.cursor.cacheLast = &g_ps.cursor.cache;
   g_ps.cursor.current   = convertCursor(&msg->cursor);
+
+  updateCursorImage();
+  updateCursorStatus();
+  updateCursorTrail();
 
   return PS_STATUS_OK;
 }
@@ -191,6 +248,7 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
   g_ps.cursor.x       = msg->position.x;
   g_ps.cursor.y       = msg->position.y;
   g_ps.cursor.visible = msg->visible;
+  updateCursorStatus();
 
   if (g_ps.cursor.current && !g_ps.cursor.current->cached)
     free(g_ps.cursor.current);
@@ -206,6 +264,7 @@ static PS_STATUS onMessage_cursorMove(PSChannel * channel)
 
   g_ps.cursor.x = msg->position.x;
   g_ps.cursor.y = msg->position.y;
+  updateCursorStatus();
 
   return PS_STATUS_OK;
 }
@@ -215,6 +274,7 @@ static PS_STATUS onMessage_cursorHide(PSChannel * channel)
   (void) channel;
 
   g_ps.cursor.visible = false;
+  updateCursorStatus();
 
   return PS_STATUS_OK;
 }
@@ -225,6 +285,7 @@ static PS_STATUS onMessage_cursorTrail(PSChannel * channel)
 
   g_ps.cursor.trailLen  = msg->length;
   g_ps.cursor.trailFreq = msg->frequency;
+  updateCursorTrail();
 
   return PS_STATUS_OK;
 }
