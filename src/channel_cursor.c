@@ -217,6 +217,9 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
   g_ps.cursor.cacheLast = &g_ps.cursor.cache;
   g_ps.cursor.current   = convertCursor(&msg->cursor);
 
+  if (!g_ps.cursor.current)
+    g_ps.cursor.visible = false;
+
   updateCursorImage();
   updateCursorStatus();
   updateCursorTrail();
@@ -251,12 +254,16 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
   g_ps.cursor.x       = msg->position.x;
   g_ps.cursor.y       = msg->position.y;
   g_ps.cursor.visible = msg->visible;
-  updateCursorStatus();
 
   if (g_ps.cursor.current && !g_ps.cursor.current->cached)
     free(g_ps.cursor.current);
 
   g_ps.cursor.current = convertCursor(&msg->cursor);
+
+  if (!g_ps.cursor.current)
+    g_ps.cursor.visible = false;
+
+  updateCursorStatus();
   updateCursorImage();
 
   return PS_STATUS_OK;
