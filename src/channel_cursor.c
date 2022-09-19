@@ -254,6 +254,7 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
     free(g_ps.cursor.current);
 
   g_ps.cursor.current = convertCursor(&msg->cursor);
+  updateCursorImage();
 
   return PS_STATUS_OK;
 }
