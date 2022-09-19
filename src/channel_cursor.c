@@ -113,6 +113,9 @@ static struct PSCursorImage * loadCursor(uint64_t id)
 
 static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
 {
+  if (cursor->flags & SPICE_CURSOR_FLAGS_NONE)
+    return NULL;
+
   if (cursor->flags & SPICE_CURSOR_FLAGS_FROM_CACHE)
     return loadCursor(cursor->header.unique);
 
