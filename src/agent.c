@@ -510,7 +510,7 @@ bool purespice_clipboardGrab(PSDataType types[], int count)
   return true;
 }
 
-bool purespice_clipboardRelease()
+bool purespice_clipboardRelease(void)
 {
   if (!agent.present)
     return false;

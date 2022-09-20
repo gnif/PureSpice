@@ -284,7 +284,7 @@ err_host:
   return false;
 }
 
-void purespice_disconnect()
+void purespice_disconnect(void)
 {
   if (!g_ps.initialized)
   {
