@@ -328,11 +328,11 @@ static PS_STATUS onMessage_displayDrawCopy(PSChannel * channel)
     {
       SpiceBitmap bmp;
       readSpiceBitmap(channel->buffer, dst.data.src_bitmap, &bmp);
-
+      const bool topDown = bmp.flags & SPICE_BITMAP_FLAGS_TOP_DOWN;
       g_ps.config.display.drawBitmap(
           dst.base.surface_id,
           PS_BITMAP_FMT_RGBA,
-          bmp.flags & SPICE_BITMAP_FLAGS_TOP_DOWN,
+          topDown,
           dst.base.box.left,
           dst.base.box.top,
           bmp.x,

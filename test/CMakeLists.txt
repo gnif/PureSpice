@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.0)
+cmake_minimum_required(VERSION 3.5)
 set(TARGET_NAME "spice-test")
 project(${TARGET_NAME})
 

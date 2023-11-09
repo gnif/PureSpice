@@ -262,7 +262,7 @@ int main(int argc, char * argv[])
 {
   char * host;
   int port = 5900;
-
+#if 0
   if (argc < 2)
   {
     printf("Usage: %s host [port]\n", argv[0]);
@@ -272,6 +272,9 @@ int main(int argc, char * argv[])
   host = argv[1];
   if (argc > 2)
     port = atoi(argv[2]);
+#endif
+  host = "/opt/PVM/vms/Windows/windows.sock";
+  port = 0;
 
   int retval = 0;
 
@@ -304,11 +307,11 @@ int main(int argc, char * argv[])
     .inputs    =
     {
       .enable      = true,
-      .autoConnect = false
+      .autoConnect = true
     },
     .clipboard =
     {
-      .enable  = false,
+      .enable  = true,
       .notice  = clipboard_notice,
       .data    = clipboard_data,
       .release = clipboard_release,
@@ -316,19 +319,21 @@ int main(int argc, char * argv[])
     },
     .playback =
     {
-      .enable = false,
-      .start  = playback_start,
-      .volume = playback_volume,
-      .mute   = playback_mute,
-      .stop   = playback_stop,
-      .data   = playback_data
+      .enable      = true,
+      .autoConnect = true,
+      .start       = playback_start,
+      .volume      = playback_volume,
+      .mute        = playback_mute,
+      .stop        = playback_stop,
+      .data        = playback_data
     },
     .record = {
-      .enable = false,
-      .start  = record_start,
-      .mute   = record_mute,
-      .volume = record_volume,
-      .stop   = record_stop
+      .enable      = true,
+      .autoConnect = true,
+      .start       = record_start,
+      .mute        = record_mute,
+      .volume      = record_volume,
+      .stop        = record_stop
     },
     .display = {
       .enable         = true,
