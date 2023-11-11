@@ -134,6 +134,15 @@ PS_STATUS channel_connect(PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
+  // in practice I have not seen this exceed 186, but it might depending on
+  // future protocol changes, so put a reaonable upper bound on it
+  if (header.size > 200)
+  {
+    channel_internal_disconnect(channel);
+    PS_LOG_ERROR("SpiceLinkReply header size seems too large");
+    return PS_STATUS_ERROR;
+  }
+
   SpiceLinkReply * reply = alloca(header.size);
   if ((status = channel_readNL(channel, reply, header.size,
           NULL)) != PS_STATUS_OK)
