@@ -172,13 +172,8 @@ static void resolveSpiceCopy(const uint8_t * data, uint8_t ** ptr,
 {
   resolveSpiceImage(data, ptr, &dst->src_bitmap);
 
-  const int copy =
-      sizeof(dst->src_area      ) +
-      sizeof(dst->rop_descriptor) +
-      sizeof(dst->scale_mode    );
-
-  memcpy(&dst->src_area, *ptr, copy);
-  *ptr += copy;
+  memcpy(&dst->meta, *ptr, sizeof(dst->meta));
+  *ptr += sizeof(dst->meta);
 
   resolveSpiceQMask(data, ptr, &dst->mask);
 }

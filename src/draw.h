@@ -206,9 +206,13 @@ SpiceClip;
 typedef struct SpiceCopy
 {
   SpiceImage * src_bitmap;
-  SpiceRect    src_area;
-  uint16_t     rop_descriptor;
-  uint8_t      scale_mode;
+  struct
+  {
+    SpiceRect    src_area;
+    uint16_t     rop_descriptor;
+    uint8_t      scale_mode;
+  }
+  meta;
   SpiceQMask   mask;
 }
 SpiceCopy,
