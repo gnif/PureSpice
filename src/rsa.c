@@ -212,6 +212,11 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
       }
     }
   }
+  else
+  {
+    PS_LOG_ERROR("failed to parse asn1 header");
+    return false;
+  }
 
   mpz_t p;
   mpz_init(p);
