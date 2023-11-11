@@ -136,7 +136,7 @@ static void resolveSpicePalette(const uint8_t * data, uint8_t ** ptr,
   {
     *dst = (SpicePalette *)data + offset;
     memcpy(dst_id, ptr, sizeof(*dst_id));
-    ptr += sizeof(*dst_id);
+    *ptr += sizeof(*dst_id);
   }
   else
   {
