@@ -70,33 +70,36 @@ const SpiceLinkHeader * channelCursor_getConnectPacket(void)
 
 static size_t cursorBufferSize(SpiceCursorHeader * header)
 {
+  const unsigned width  = (unsigned)header->width;
+  const unsigned height = (unsigned)header->height;
+
   switch (header->type)
   {
     case SPICE_CURSOR_TYPE_ALPHA:
-      return header->width * header->height * 4;
+      return width * height * 4;
 
     case SPICE_CURSOR_TYPE_MONO:
-      return (header->width + 7) / 8 * header->height * 2;
+      return (width + 7) / 8 * height * 2;
 
     case SPICE_CURSOR_TYPE_COLOR4:
-      return (header->width + 1) / 2 * header->height + 16 * sizeof(uint32_t) +
-        (header->width + 7) / 8 * header->height;
+      return (width + 1) / 2 * height + 16 * sizeof(uint32_t) +
+        (width + 7) / 8 * height;
 
     case SPICE_CURSOR_TYPE_COLOR8:
-      return header->width * header->height + 256 * sizeof(uint32_t) +
-        (header->width + 7) / 8 * header->height;
+      return width * height + 256 * sizeof(uint32_t) +
+        (width + 7) / 8 * height;
 
     case SPICE_CURSOR_TYPE_COLOR16:
-      return header->width * header->height * 2 +
-        (header->width + 7) / 8 * header->height;
+      return width * height * 2 +
+        (width + 7) / 8 * height;
 
     case SPICE_CURSOR_TYPE_COLOR24:
-      return header->width * header->height * 3 +
-        (header->width + 7) / 8 * header->height;
+      return width * height * 3 +
+        (width + 7) / 8 * height;
 
     case SPICE_CURSOR_TYPE_COLOR32:
-      return header->width * header->height * 4 +
-        (header->width + 7) / 8 * header->height;
+      return width * height * 4 +
+        (width + 7) / 8 * height;
   }
 
   return 0;
@@ -169,8 +172,9 @@ static void updateCursorImage(void)
 
     case SPICE_CURSOR_TYPE_MONO:
     {
-      size_t size = (g_ps.cursor.current->header.width + 7) / 8 *
-        g_ps.cursor.current->header.height;
+      const unsigned width  = g_ps.cursor.current->header.width;
+      const unsigned height = g_ps.cursor.current->header.height;
+      const unsigned size   = (width + 7) / 8 * height;
 
       const uint8_t * xorBuffer = g_ps.cursor.current->buffer;
       const uint8_t * andBuffer = xorBuffer + size;
