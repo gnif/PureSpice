@@ -122,6 +122,13 @@ static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
   if (cursor->flags & SPICE_CURSOR_FLAGS_FROM_CACHE)
     return loadCursor(cursor->header.unique);
 
+  if (cursor->header.width > 512 || cursor->header.height > 512)
+  {
+    PS_LOG_ERROR("Unexpected cursor size: %ux%u",
+        cursor->header.width, cursor->header.height);
+    return NULL;
+  }
+
   size_t bufferSize = cursorBufferSize(&cursor->header);
   struct PSCursorImage * node = malloc(sizeof(struct PSCursorImage) + bufferSize);
 
