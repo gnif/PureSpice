@@ -87,8 +87,10 @@ PS_STATUS channel_connect(PSChannel * channel)
   if (g_ps.family != AF_UNIX)
   {
     const int flag = 1;
-    setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY , &flag, sizeof(int));
-    setsockopt(channel->socket, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(int));
+    (void)setsockopt(channel->socket, IPPROTO_TCP,
+        TCP_NODELAY , &flag, sizeof(int));
+    (void)setsockopt(channel->socket, IPPROTO_TCP,
+        TCP_QUICKACK, &flag, sizeof(int));
   }
 
   if (connect(channel->socket, &g_ps.addr.addr, addrSize) == -1)
@@ -225,8 +227,8 @@ void channel_internal_disconnect(PSChannel * channel)
     if (g_ps.family != AF_UNIX)
     {
       flag = 0;
-      setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY,
-          (char *)&flag, sizeof(int));
+      (void)setsockopt(channel->socket, IPPROTO_TCP,
+          TCP_NODELAY, (char *)&flag, sizeof(int));
     }
 
     SpiceMsgcDisconnecting * packet = SPICE_PACKET(SPICE_MSGC_DISCONNECTING,
@@ -239,8 +241,8 @@ void channel_internal_disconnect(PSChannel * channel)
     if (g_ps.family != AF_UNIX)
     {
       flag = 1;
-      setsockopt(channel->socket, IPPROTO_TCP, TCP_NODELAY,
-          (char *)&flag, sizeof(int));
+      (void)setsockopt(channel->socket, IPPROTO_TCP,
+          TCP_NODELAY, (char *)&flag, sizeof(int));
     }
   }
 
