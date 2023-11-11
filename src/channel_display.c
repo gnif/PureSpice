@@ -121,7 +121,7 @@ static void resolveDisplayBase(uint8_t ** ptr, SpiceMsgDisplayBase * base)
 
 static void resolveSpicePoint(uint8_t ** ptr, SpicePoint * dst)
 {
-  memcpy(dst, ptr, sizeof(*dst));
+  memcpy(dst, *ptr, sizeof(*dst));
   *ptr += sizeof(*dst);
 }
 
