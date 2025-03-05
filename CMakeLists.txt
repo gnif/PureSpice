@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(purespice LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 
