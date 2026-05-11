@@ -9,6 +9,13 @@ pkg_check_modules(SPICE_PKGCONFIG REQUIRED
 	hogweed
 )
 
+if (SPICE_PKGCONFIG_nettle_VERSION)
+	if (SPICE_PKGCONFIG_nettle_VERSION VERSION_GREATER_EQUAL "4.0")
+		message(STATUS "Using nettle >= 4.0 compatibility")
+		add_compile_definitions(USE_NETTLE_GE_4)
+	endif()
+endif()
+
 add_definitions(-D USE_NETTLE)
 
 add_compile_options(
