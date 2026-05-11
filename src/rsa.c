@@ -62,7 +62,12 @@ static void sha1(uint8_t * hash, const uint8_t *data, unsigned int len)
 
   sha1_init(&ctx);
   sha1_update(&ctx, len, data);
+
+#if defined(USE_NETTLE_GE_4)
+  sha1_digest(&ctx, hash);
+#else
   sha1_digest(&ctx, SHA1_HASH_LEN, hash);
+#endif
 }
 
 static void oaep_mask(uint8_t * dest, size_t dest_len,
