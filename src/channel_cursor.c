@@ -120,15 +120,21 @@ static struct PSCursorImage * convertCursor(
     SpiceCursor * cursor, size_t available, bool * valid)
 {
   *valid = false;
-  if (available < sizeof(*cursor))
+  if (available < offsetof(SpiceCursor, header))
   {
-    PS_LOG_ERROR("Cursor message is missing its cursor header");
+    PS_LOG_ERROR("Cursor message is missing its flags");
     return NULL;
   }
 
   if (cursor->flags & SPICE_CURSOR_FLAGS_NONE)
   {
     *valid = true;
+    return NULL;
+  }
+
+  if (available < sizeof(*cursor))
+  {
+    PS_LOG_ERROR("Cursor message is missing its cursor header");
     return NULL;
   }
 
@@ -308,7 +314,7 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 {
   const size_t cursorOffset = offsetof(SpiceMsgCursorInit, cursor);
   if (!channel_validatePayload(
-        channel, cursorOffset + sizeof(SpiceCursor), "CURSOR_INIT"))
+        channel, cursorOffset + offsetof(SpiceCursor, header), "CURSOR_INIT"))
     return PS_STATUS_ERROR;
 
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
@@ -353,7 +359,7 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
 {
   const size_t cursorOffset = offsetof(SpiceMsgCursorSet, cursor);
   if (!channel_validatePayload(
-        channel, cursorOffset + sizeof(SpiceCursor), "CURSOR_SET"))
+        channel, cursorOffset + offsetof(SpiceCursor, header), "CURSOR_SET"))
     return PS_STATUS_ERROR;
 
   SpiceMsgCursorSet * msg = (SpiceMsgCursorSet *)channel->buffer;
