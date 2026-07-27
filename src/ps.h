@@ -173,6 +173,9 @@ struct PSCursorImage
 struct PS
 {
   bool     initialized;
+  atomic_bool processing;
+  atomic_bool disconnectPending;
+  atomic_bool disconnectWasConnected;
   PSInit   init;
   PSConfig config;
 
@@ -191,7 +194,7 @@ struct PS
   char   * guestName;
   uint8_t  guestUUID[16];
 
-  bool   connected;
+  atomic_bool connected;
   int    epollfd;
   PSChannel channels[PS_CHANNEL_MAX];
   bool   channelsReady;

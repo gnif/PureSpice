@@ -47,6 +47,8 @@
 
 #include <spice/vd_agent.h>
 
+static atomic_flag disconnectLock = ATOMIC_FLAG_INIT;
+
 // globals
 PS g_ps =
 {
@@ -293,17 +295,8 @@ err_host:
   return false;
 }
 
-void purespice_disconnect(void)
+static void purespice_disconnectNow(bool wasConnected)
 {
-  if (!g_ps.initialized)
-  {
-    log_init();
-    g_ps.initialized = true;
-  }
-
-  const bool wasConnected = g_ps.connected;
-  g_ps.connected = false;
-
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     channel_internal_disconnect(&g_ps.channels[i]);
 
@@ -343,7 +336,35 @@ void purespice_disconnect(void)
     PS_LOG_INFO("Disconnected");
 }
 
-PSStatus purespice_process(int timeout)
+static void purespice_finishPendingDisconnectLocked(void)
+{
+  while(atomic_exchange(&g_ps.disconnectPending, false))
+  {
+    const bool wasConnected =
+      atomic_exchange(&g_ps.disconnectWasConnected, false);
+    purespice_disconnectNow(wasConnected);
+  }
+}
+
+void purespice_disconnect(void)
+{
+  if (!g_ps.initialized)
+    purespice_init(NULL);
+
+  /*
+   * Handlers and application callbacks execute inside purespice_process().
+   * Leave their channel buffers alive until the dispatcher has unwound.
+   */
+  SPICE_LOCK(disconnectLock);
+  if (atomic_exchange(&g_ps.connected, false))
+    atomic_store(&g_ps.disconnectWasConnected, true);
+  atomic_store(&g_ps.disconnectPending, true);
+  if (!atomic_load(&g_ps.processing))
+    purespice_finishPendingDisconnectLocked();
+  SPICE_UNLOCK(disconnectLock);
+}
+
+static PSStatus purespice_processInternal(int timeout)
 {
   static struct epoll_event events[PS_CHANNEL_MAX];
 
@@ -353,6 +374,9 @@ PSStatus purespice_process(int timeout)
       channel_disconnectPending(&g_ps.channels[i]);
 
   int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
+  if (atomic_load(&g_ps.disconnectPending))
+    return PS_STATUS_SHUTDOWN;
+
   if (nfds == 0 || (nfds < 0 && errno == EINTR))
     return PS_STATUS_RUN;
 
@@ -432,6 +456,9 @@ PSStatus purespice_process(int timeout)
           channel->handlerFn = channel_onMessage(channel);
         else
           channel->handlerFn = channel->onMessage(channel);
+
+        if (atomic_load(&g_ps.disconnectPending))
+          return PS_STATUS_SHUTDOWN;
 
         if (channel->handlerFn == PS_HANDLER_ERROR)
         {
@@ -526,7 +553,11 @@ PSStatus purespice_process(int timeout)
           channel->headerRead = 0;
 
           // process the data
-          switch(channel->handlerFn(channel))
+          const PS_STATUS handlerStatus = channel->handlerFn(channel);
+          if (atomic_load(&g_ps.disconnectPending))
+            return PS_STATUS_SHUTDOWN;
+
+          switch(handlerStatus)
           {
             case PS_STATUS_OK:
             case PS_STATUS_HANDLED:
@@ -573,6 +604,34 @@ done_disconnect:
 
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
+}
+
+PSStatus purespice_process(int timeout)
+{
+  SPICE_LOCK(disconnectLock);
+  if (!atomic_load(&g_ps.connected) ||
+      atomic_load(&g_ps.disconnectPending))
+  {
+    purespice_finishPendingDisconnectLocked();
+    SPICE_UNLOCK(disconnectLock);
+    return PS_STATUS_SHUTDOWN;
+  }
+  atomic_store(&g_ps.processing, true);
+  SPICE_UNLOCK(disconnectLock);
+
+  PSStatus status = purespice_processInternal(timeout);
+
+  SPICE_LOCK(disconnectLock);
+  atomic_store(&g_ps.processing, false);
+
+  if (atomic_load(&g_ps.disconnectPending))
+  {
+    purespice_finishPendingDisconnectLocked();
+    status = PS_STATUS_SHUTDOWN;
+  }
+  SPICE_UNLOCK(disconnectLock);
+
+  return status;
 }
 
 bool purespice_getServerInfo(PSServerInfo * info)
