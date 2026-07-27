@@ -323,7 +323,7 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
   atomic_fetch_add(&g_ps.mouse.sentCount, msgs);
 
   SPICE_LOCK(channel->lock);
-  const ssize_t wrote = send(channel->socket, buffer, bufferSize, 0);
+  const ssize_t wrote = channel_writeNL(channel, buffer, bufferSize);
   SPICE_UNLOCK(channel->lock);
 
   if ((size_t)wrote != bufferSize)

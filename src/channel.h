@@ -40,7 +40,7 @@ bool channel_validatePayload(const PSChannel * channel, size_t minimum,
 bool channel_validateRange(const PSChannel * channel, size_t offset,
     size_t length, const char * field);
 
-ssize_t channel_writeNL(const PSChannel * channel,
+ssize_t channel_writeNL(PSChannel * channel,
     const void * buffer, size_t size);
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,

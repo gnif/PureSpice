@@ -170,7 +170,7 @@ bool purespice_writeAudio(void * data, size_t size, uint32_t time)
     PS_LOG_ERROR("Failed to write SpiceMsgcRecordPacket");
     return false;
   }
-  const ssize_t wrote = send(channel->socket, data, size, 0);
+  const ssize_t wrote = channel_writeNL(channel, data, size);
   SPICE_UNLOCK(channel->lock);
 
   if ((size_t)wrote != size)

@@ -89,7 +89,7 @@
       sizeof(SpiceMiniDataHeader)); \
   ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
   SPICE_LOCK((channel)->lock); \
-  const ssize_t wrote = send((channel)->socket, header, *sz, 0); \
+  const ssize_t wrote = channel_writeNL((channel), header, *sz); \
   SPICE_UNLOCK((channel)->lock); \
   wrote == *sz; \
 })
@@ -99,7 +99,7 @@
   SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(((uint8_t *)packet) - \
       sizeof(SpiceMiniDataHeader)); \
   ssize_t *sz = (ssize_t *)(((uint8_t *)header) - sizeof(ssize_t)); \
-  const ssize_t wrote = send((channel)->socket, header, *sz, 0); \
+  const ssize_t wrote = channel_writeNL((channel), header, *sz); \
   wrote == *sz; \
 })
 

@@ -454,7 +454,7 @@ bool channel_ack(PSChannel * channel)
   return true;
 }
 
-ssize_t channel_writeNL(const PSChannel * channel,
+ssize_t channel_writeNL(PSChannel * channel,
     const void * buffer, size_t size)
 {
   if (!channel->connected)
@@ -463,7 +463,20 @@ ssize_t channel_writeNL(const PSChannel * channel,
   if (!buffer)
     return -1;
 
-  return send(channel->socket, buffer, size, 0);
+  const ssize_t result =
+    send(channel->socket, buffer, size, MSG_NOSIGNAL);
+  if (result < 0 || (size_t)result != size)
+  {
+    /*
+     * Retrying a partial send would allow a concurrent sender to interleave
+     * another message before the remainder and corrupt the stream framing.
+     * Fail the channel instead.
+     */
+    shutdown(channel->socket, SHUT_RDWR);
+    channel->doDisconnect = true;
+  }
+
+  return result;
 }
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
