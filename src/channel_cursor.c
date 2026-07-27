@@ -246,14 +246,6 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
   g_ps.cursor.visible = false;
   g_ps.cursor.current = NULL;
 
-  struct PSCursorImage * node;
-  struct PSCursorImage * next;
-  for (node = g_ps.cursor.cache; node; node = next)
-  {
-    next = node->next;
-    free(node);
-  }
-
   clearCursorCache();
 
   return PS_STATUS_OK;
