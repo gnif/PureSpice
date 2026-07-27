@@ -117,7 +117,14 @@ bool agent_present(void)
 static PS_STATUS agent_connectLocked(void)
 {
   if (!agent.queue)
+  {
     agent.queue = queue_new();
+    if (!agent.queue)
+    {
+      PS_LOG_ERROR("Failed to allocate the agent message queue");
+      return PS_STATUS_ERROR;
+    }
+  }
   else
   {
     void * msg;
@@ -498,7 +505,14 @@ static bool agent_processQueueLocked(void)
   while (queue_peek(agent.queue, NULL) && agent_takeServerToken())
   {
     void * msg;
-    queue_shift(agent.queue, &msg);
+    if (!queue_shift(agent.queue, &msg))
+    {
+      agent_returnServerTokens(1);
+      SPICE_UNLOCK(channel->lock);
+      PS_LOG_ERROR("Failed to remove a queued agent packet");
+      return false;
+    }
+
     if (!SPICE_SEND_PACKET_NL(channel, msg))
     {
       SPICE_RAW_PACKET_FREE(msg);
@@ -522,13 +536,25 @@ static bool agent_startMsg(uint32_t type, ssize_t size)
 
   VDAgentMessage * msg =
     SPICE_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, VDAgentMessage, 0);
+  if (!msg)
+  {
+    PS_LOG_ERROR("Failed to allocate a VDAgent message");
+    return false;
+  }
 
   msg->protocol  = VD_AGENT_PROTOCOL;
   msg->type      = type;
   msg->opaque    = 0;
   msg->size      = size;
+
+  if (!queue_push(agent.queue, msg))
+  {
+    SPICE_RAW_PACKET_FREE(msg);
+    PS_LOG_ERROR("Failed to queue a VDAgent message");
+    return false;
+  }
+
   agent.msgSize  = size;
-  queue_push(agent.queue, msg);
 
   return agent_processQueueLocked();
 }
@@ -549,8 +575,21 @@ static bool agent_writeMsg(const void * buffer_, ssize_t size)
       VD_AGENT_MAX_DATA_SIZE : size;
 
     void * msg = SPICE_RAW_PACKET_MALLOC(SPICE_MSGC_MAIN_AGENT_DATA, toWrite, 0);
+    if (!msg)
+    {
+      channel_disconnect(&g_ps.channels[PS_CHANNEL_MAIN]);
+      PS_LOG_ERROR("Failed to allocate VDAgent message data");
+      return false;
+    }
+
     memcpy(msg, buffer, toWrite);
-    queue_push(agent.queue, msg);
+    if (!queue_push(agent.queue, msg))
+    {
+      SPICE_RAW_PACKET_FREE(msg);
+      channel_disconnect(&g_ps.channels[PS_CHANNEL_MAIN]);
+      PS_LOG_ERROR("Failed to queue VDAgent message data");
+      return false;
+    }
 
     size          -= toWrite;
     buffer        += toWrite;

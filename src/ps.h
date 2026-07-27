@@ -44,23 +44,35 @@
  * unbounded allocation. */
 #define SPICE_MAX_MESSAGE_SIZE (256U * 1024U * 1024U)
 
-#define _SPICE_RAW_PACKET(htype, dataSize, extraData, _alloc) \
-({ \
-  uint8_t * packet = _alloc(sizeof(ssize_t) + \
-      sizeof(SpiceMiniDataHeader) + dataSize); \
-  ssize_t * sz = (ssize_t*)packet; \
-  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(sz + 1); \
-  *sz          = sizeof(SpiceMiniDataHeader) + dataSize; \
-  header->type = (htype); \
-  header->size = dataSize + extraData; \
-  (header + 1); \
-})
+static inline void * spice_initPacket(void * packet, uint16_t type,
+    size_t dataSize, size_t extraData)
+{
+  ssize_t * size = packet;
+  SpiceMiniDataHeader * header = (SpiceMiniDataHeader *)(size + 1);
+  *size        = sizeof(*header) + dataSize;
+  header->type = type;
+  header->size = dataSize + extraData;
+  return header + 1;
+}
 
 #define SPICE_RAW_PACKET(htype, dataSize, extraData) \
-  _SPICE_RAW_PACKET(htype, dataSize, extraData, alloca)
+({ \
+  const size_t packetDataSize = (dataSize); \
+  void * packet = alloca(sizeof(ssize_t) + \
+      sizeof(SpiceMiniDataHeader) + packetDataSize); \
+  spice_initPacket(packet, (htype), packetDataSize, (extraData)); \
+})
 
 #define SPICE_RAW_PACKET_MALLOC(htype, dataSize, extraData) \
-  _SPICE_RAW_PACKET(htype, dataSize, extraData, malloc)
+({ \
+  const size_t packetDataSize = (dataSize); \
+  const size_t packetOverhead = sizeof(ssize_t) + \
+    sizeof(SpiceMiniDataHeader); \
+  void * packet = packetDataSize > SIZE_MAX - packetOverhead ? NULL : \
+    malloc(packetOverhead + packetDataSize); \
+  packet ? spice_initPacket( \
+      packet, (htype), packetDataSize, (extraData)) : NULL; \
+})
 
 #define SPICE_RAW_PACKET_FREE(packet) \
 { \

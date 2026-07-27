@@ -311,6 +311,7 @@ static void purespice_disconnectNow(bool wasConnected)
     free(g_ps.motionBuffer);
     g_ps.motionBuffer = NULL;
   }
+  g_ps.motionBufferSize = 0;
 
   if (g_ps.config.host)
   {
@@ -639,8 +640,15 @@ bool purespice_getServerInfo(PSServerInfo * info)
   if (!g_ps.guestName)
     return false;
 
+  char * name = strdup(g_ps.guestName);
+  if (!name)
+  {
+    PS_LOG_ERROR("Failed to allocate the server name");
+    return false;
+  }
+
   memcpy(info->uuid, g_ps.guestUUID, sizeof(g_ps.guestUUID));
-  info->name = strdup(g_ps.guestName);
+  info->name = name;
 
   return true;
 }

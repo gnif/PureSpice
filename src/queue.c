@@ -42,6 +42,9 @@ struct Queue
 struct Queue * queue_new(void)
 {
   struct Queue * list = malloc(sizeof(struct Queue));
+  if (!list)
+    return NULL;
+
   list->head  = NULL;
   list->tail  = NULL;
   list->pos   = NULL;
@@ -57,9 +60,15 @@ void queue_free(struct Queue * list)
   free(list);
 }
 
-void queue_push(struct Queue * list, void * data)
+bool queue_push(struct Queue * list, void * data)
 {
+  if (!list)
+    return false;
+
   struct QueueItem * item = malloc(sizeof(struct QueueItem));
+  if (!item)
+    return false;
+
   item->data = data;
   item->next = NULL;
 
@@ -71,12 +80,13 @@ void queue_push(struct Queue * list, void * data)
     list->head = item;
     list->tail = item;
     SPICE_UNLOCK(list->lock);
-    return;
+    return true;
   }
 
   list->tail->next = item;
   list->tail       = item;
   SPICE_UNLOCK(list->lock);
+  return true;
 }
 
 bool queue_shift(struct Queue * list, void ** data)

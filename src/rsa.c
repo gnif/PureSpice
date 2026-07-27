@@ -156,6 +156,14 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
 
   result->size = RSA_size(rsa);
   result->data = (char *)malloc(result->size);
+  if (!result->data)
+  {
+    result->size = 0;
+    EVP_PKEY_free(rsaKey);
+    BIO_free(bioKey);
+    PS_LOG_ERROR("Failed to allocate the encrypted password");
+    return false;
+  }
 
   if (RSA_public_encrypt(
         strlen(password) + 1,
@@ -231,6 +239,15 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
 
   result->size = pub.size;
   result->data = malloc(pub.size);
+  if (!result->data)
+  {
+    result->size = 0;
+    rsa_public_key_clear(&pub);
+    mpz_clear(p);
+    PS_LOG_ERROR("Failed to allocate the encrypted password");
+    return false;
+  }
+
   nettle_mpz_get_str_256(pub.size, (uint8_t *)result->data, p);
 
   rsa_public_key_clear(&pub);

@@ -27,7 +27,7 @@ struct Queue;
 
 struct Queue * queue_new(void);
 void queue_free(struct Queue * list);
-void queue_push(struct Queue * list, void * data);
+bool queue_push(struct Queue * list, void * data);
 bool queue_shift(struct Queue * list, void ** data);
 bool queue_peek(struct Queue * list, void ** data);
 

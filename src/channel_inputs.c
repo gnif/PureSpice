@@ -292,9 +292,14 @@ bool purespice_mouseMotion(int32_t x, int32_t y)
 
   if (bufferSize > g_ps.motionBufferSize)
   {
-    if (g_ps.motionBuffer)
-      free(g_ps.motionBuffer);
-    g_ps.motionBuffer     = malloc(bufferSize);
+    uint8_t * buffer = realloc(g_ps.motionBuffer, bufferSize);
+    if (!buffer)
+    {
+      PS_LOG_ERROR("Failed to allocate the mouse motion buffer");
+      return false;
+    }
+
+    g_ps.motionBuffer     = buffer;
     g_ps.motionBufferSize = bufferSize;
   }
 
