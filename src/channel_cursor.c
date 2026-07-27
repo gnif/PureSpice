@@ -180,28 +180,74 @@ static void cacheCursor(struct PSCursorImage * node)
   if (!node || !node->cached)
     return;
 
+  struct PSCursorImage ** prev = &g_ps.cursor.cache;
   for(struct PSCursorImage * cached = g_ps.cursor.cache;
-      cached; cached = cached->next)
+      cached; prev = &cached->next, cached = cached->next)
+  {
     if (cached == node)
       return;
+
+    if (cached->header.unique == node->header.unique)
+    {
+      *prev = cached->next;
+      if (!cached->next)
+        g_ps.cursor.cacheLast = prev;
+      free(cached);
+      break;
+    }
+  }
 
   node->next             = NULL;
   *g_ps.cursor.cacheLast = node;
   g_ps.cursor.cacheLast  = &node->next;
 }
 
-static void clearCursorCache(void)
+static bool cursorCacheContains(const struct PSCursorImage * cursor)
+{
+  for(const struct PSCursorImage * node = g_ps.cursor.cache;
+      node; node = node->next)
+    if (node == cursor)
+      return true;
+
+  return false;
+}
+
+static void clearCursorCache(bool preserveCurrent)
 {
   struct PSCursorImage * node;
   struct PSCursorImage * next;
   for (node = g_ps.cursor.cache; node; node = next)
   {
     next = node->next;
-    free(node);
+    if (preserveCurrent && node == g_ps.cursor.current)
+    {
+      node->cached = false;
+      node->next   = NULL;
+    }
+    else
+      free(node);
   }
 
   g_ps.cursor.cache     = NULL;
   g_ps.cursor.cacheLast = &g_ps.cursor.cache;
+
+  /* A cached current cursor should always be in the cache, but retain safe
+   * ownership if an earlier cache miss or protocol reset broke that invariant. */
+  if (preserveCurrent && g_ps.cursor.current)
+    g_ps.cursor.current->cached = false;
+}
+
+static void clearCursorState(void)
+{
+  struct PSCursorImage * current = g_ps.cursor.current;
+  const bool cacheOwnsCurrent =
+    current && current->cached && cursorCacheContains(current);
+
+  g_ps.cursor.current = NULL;
+  if (current && !cacheOwnsCurrent)
+    free(current);
+
+  clearCursorCache(false);
 }
 
 static void updateCursorImage(void)
@@ -266,6 +312,8 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
     return PS_STATUS_ERROR;
 
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
+  clearCursorState();
+
   bool valid;
   struct PSCursorImage * image = convertCursor(
       &msg->cursor, channel->header.size - cursorOffset, &valid);
@@ -278,9 +326,7 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
   g_ps.cursor.trailLen  = msg->trail_length;
   g_ps.cursor.trailFreq = msg->trail_frequency;
 
-  g_ps.cursor.cache     = NULL;
-  g_ps.cursor.cacheLast = &g_ps.cursor.cache;
-  g_ps.cursor.current   = image;
+  g_ps.cursor.current = image;
   cacheCursor(image);
 
   if (!g_ps.cursor.current)
@@ -298,9 +344,7 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
   (void) channel;
 
   g_ps.cursor.visible = false;
-  g_ps.cursor.current = NULL;
-
-  clearCursorCache();
+  clearCursorState();
 
   return PS_STATUS_OK;
 }
@@ -396,6 +440,14 @@ static PS_STATUS onMessage_cursorInvalOne(PSChannel * channel)
       *prev = node->next;
       if (!node->next)
         g_ps.cursor.cacheLast = prev;
+
+      if (node == g_ps.cursor.current)
+      {
+        node->cached = false;
+        node->next   = NULL;
+      }
+      else
+        free(node);
       break;
     }
 
@@ -410,7 +462,7 @@ static PS_STATUS onMessage_cursorInvalAll(PSChannel * channel)
 {
   (void) channel;
 
-  clearCursorCache();
+  clearCursorCache(true);
 
   return PS_STATUS_OK;
 }
