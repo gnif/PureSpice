@@ -44,7 +44,9 @@ static uint64_t get_timestamp(void)
   return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
 }
 
-PS_STATUS channel_connect(PSChannel * channel)
+static void channel_internal_disconnectNL(PSChannel * channel);
+
+static PS_STATUS channel_connectNL(PSChannel * channel)
 {
   PS_STATUS status;
 
@@ -52,11 +54,6 @@ PS_STATUS channel_connect(PSChannel * channel)
   channel->initDone     = false;
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
-
-  if (channel->spiceType == SPICE_CHANNEL_INPUTS)
-    SPICE_LOCK_INIT(g_ps.mouse.lock);
-
-  SPICE_LOCK_INIT(channel->lock);
 
   size_t addrSize;
   switch(g_ps.family)
@@ -106,7 +103,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   const SpiceLinkHeader * p = channel->getConnectPacket();
   if ((size_t)channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
@@ -115,7 +112,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, &header, sizeof(header),
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to read the reply to the connect packet");
     return status;
   }
@@ -123,14 +120,14 @@ PS_STATUS channel_connect(PSChannel * channel)
   if (header.magic         != SPICE_MAGIC ||
       header.major_version != SPICE_VERSION_MAJOR)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
   if (header.size < sizeof(SpiceLinkReply))
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
     return PS_STATUS_ERROR;
   }
@@ -139,7 +136,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   // future protocol changes, so put a reaonable upper bound on it
   if (header.size > 200)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("SpiceLinkReply header size seems too large");
     return PS_STATUS_ERROR;
   }
@@ -148,13 +145,13 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, reply, header.size,
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     return status;
   }
 
   if (reply->error != SPICE_LINK_ERR_OK)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Server reported link error: %d", reply->error);
     return PS_STATUS_ERROR;
   }
@@ -173,7 +170,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
   if (channel_writeNL(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to write the auth mechanisim packet");
     return PS_STATUS_ERROR;
   }
@@ -181,7 +178,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   PSPassword pass;
   if (!rsa_encryptPassword(reply->pub_key, g_ps.config.password, &pass))
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to encrypt the password");
     return PS_STATUS_ERROR;
   }
@@ -189,7 +186,7 @@ PS_STATUS channel_connect(PSChannel * channel)
   if (channel_writeNL(channel, pass.data, pass.size) != pass.size)
   {
     rsa_freePassword(&pass);
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
@@ -200,14 +197,14 @@ PS_STATUS channel_connect(PSChannel * channel)
   if ((status = channel_readNL(channel, &linkResult, sizeof(linkResult),
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to read the authentication response");
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
-    channel_internal_disconnect(channel);
+    channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Server reported link error: %u", linkResult);
     return PS_STATUS_ERROR;
   }
@@ -223,7 +220,15 @@ PS_STATUS channel_connect(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-void channel_internal_disconnect(PSChannel * channel)
+PS_STATUS channel_connect(PSChannel * channel)
+{
+  SPICE_LOCK(channel->lock);
+  const PS_STATUS status = channel_connectNL(channel);
+  SPICE_UNLOCK(channel->lock);
+  return status;
+}
+
+static void channel_internal_disconnectNL(PSChannel * channel)
 {
   if (!channel->connected)
     return;
@@ -245,7 +250,7 @@ void channel_internal_disconnect(PSChannel * channel)
         SpiceMsgcDisconnecting, 0);
     packet->time_stamp = get_timestamp();
     packet->reason     = SPICE_LINK_ERR_OK;
-    SPICE_SEND_PACKET(channel, packet);
+    SPICE_SEND_PACKET_NL(channel, packet);
 
     /* re-enable nodelay as this triggers a flush according to the man page */
     if (g_ps.family != AF_UNIX)
@@ -270,6 +275,31 @@ void channel_internal_disconnect(PSChannel * channel)
   channel->doDisconnect = false;
 
   PS_LOG_INFO("%s channel disconnected", channel->name);
+}
+
+void channel_internal_disconnect(PSChannel * channel)
+{
+  SPICE_LOCK(channel->lock);
+  channel_internal_disconnectNL(channel);
+  SPICE_UNLOCK(channel->lock);
+}
+
+void channel_disconnectPending(PSChannel * channel)
+{
+  SPICE_LOCK(channel->lock);
+  if (channel->doDisconnect)
+    channel_internal_disconnectNL(channel);
+  SPICE_UNLOCK(channel->lock);
+}
+
+bool channel_cancelDisconnect(PSChannel * channel)
+{
+  SPICE_LOCK(channel->lock);
+  const bool connected = channel->connected;
+  if (connected)
+    channel->doDisconnect = false;
+  SPICE_UNLOCK(channel->lock);
+  return connected;
 }
 
 void channel_disconnect(PSChannel * channel)

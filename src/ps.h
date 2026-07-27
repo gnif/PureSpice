@@ -131,7 +131,7 @@ struct PSChannel
 {
   uint8_t      spiceType;
   const char * name;
-  bool         available;
+  atomic_bool  available;
   bool       * enable;
   bool       * autoConnect;
 
@@ -151,11 +151,12 @@ struct PSChannel
   PS_STATUS   (*onConnect)(PSChannel * channel);
   PSHandlerFn (*onMessage)(PSChannel * channel);
 
-  bool        connected;
-  bool        ready;
-  bool        doDisconnect;
-  bool        initDone;
-  int         socket;
+  atomic_bool connected;
+  atomic_bool ready;
+  atomic_bool doDisconnect;
+  atomic_bool initDone;
+  atomic_bool connecting;
+  atomic_int  socket;
   uint32_t    ackFrequency;
   uint32_t    ackCount;
   atomic_flag lock;

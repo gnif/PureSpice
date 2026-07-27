@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <errno.h>
+#include <sched.h>
 
 #include <sys/ioctl.h>
 #include <sys/epoll.h>
@@ -115,7 +116,11 @@ void purespice_init(const PSInit * init)
 
   g_ps.epollfd = -1;
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+  {
     g_ps.channels[i].socket = -1;
+    SPICE_LOCK_INIT(g_ps.channels[i].lock);
+  }
+  SPICE_LOCK_INIT(g_ps.mouse.lock);
 
   log_init();
   g_ps.initialized = true;
@@ -124,10 +129,7 @@ void purespice_init(const PSInit * init)
 bool purespice_connect(const PSConfig * config)
 {
   if (!g_ps.initialized)
-  {
-    log_init();
-    g_ps.initialized = true;
-  }
+    purespice_init(NULL);
 
   memcpy(&g_ps.config, config, sizeof(*config));
 
@@ -348,7 +350,7 @@ PSStatus purespice_process(int timeout)
   // check for pending disconnects
   for(int i = 0; i < PS_CHANNEL_MAX; ++i)
     if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
-      channel_internal_disconnect(&g_ps.channels[i]);
+      channel_disconnectPending(&g_ps.channels[i]);
 
   int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
   if (nfds == 0 || (nfds < 0 && errno == EINTR))
@@ -655,11 +657,27 @@ bool purespice_channelConnected(PSChannelType channel)
 
 PS_STATUS ps_connectChannel(PSChannel * ch)
 {
+  bool expected = false;
+  while (!atomic_compare_exchange_weak_explicit(&ch->connecting,
+      &expected, true, memory_order_acquire, memory_order_relaxed))
+  {
+    while (atomic_load_explicit(&ch->connecting, memory_order_relaxed))
+      sched_yield();
+    expected = false;
+  }
+
+  if (channel_cancelDisconnect(ch))
+  {
+    atomic_store_explicit(&ch->connecting, false, memory_order_release);
+    return PS_STATUS_OK;
+  }
+
   PS_STATUS status;
   if ((status = channel_connect(ch)) != PS_STATUS_OK)
   {
     purespice_disconnect();
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+    atomic_store_explicit(&ch->connecting, false, memory_order_release);
     return status;
   }
 
@@ -668,9 +686,11 @@ PS_STATUS ps_connectChannel(PSChannel * ch)
   {
     purespice_disconnect();
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
+    atomic_store_explicit(&ch->connecting, false, memory_order_release);
     return status;
   }
 
+  atomic_store_explicit(&ch->connecting, false, memory_order_release);
   return PS_STATUS_OK;
 }
 
@@ -685,9 +705,6 @@ bool purespice_connectChannel(PSChannelType channel)
     PS_LOG_ERROR("%s: Channel is not availble", ch->name);
     return false;
   }
-
-  if (ch->connected)
-    return true;
 
   return ps_connectChannel(ch) == PS_STATUS_OK;
 }
