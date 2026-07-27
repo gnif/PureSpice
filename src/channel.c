@@ -54,6 +54,8 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   channel->initDone     = false;
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
+  channel->discarding   = false;
+  channel->discardSize  = 0;
 
   size_t addrSize;
   switch(g_ps.family)
@@ -269,6 +271,8 @@ static void channel_internal_disconnectNL(PSChannel * channel)
   channel->bufferRead = 0;
   channel->headerRead = 0;
   channel->bufferSize = 0;
+  channel->discarding = false;
+  channel->discardSize = 0;
   free(channel->buffer);
   channel->buffer = NULL;
   channel->connected = false;
