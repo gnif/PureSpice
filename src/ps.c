@@ -113,6 +113,7 @@ void purespice_init(const PSInit * init)
   if (init)
     memcpy(&g_ps.init, init, sizeof(*init));
 
+  g_ps.epollfd = -1;
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     g_ps.channels[i].socket = -1;
 
@@ -276,6 +277,7 @@ bool purespice_connect(const PSConfig * config)
 
 err_connect:
   close(g_ps.epollfd);
+  g_ps.epollfd = -1;
 
 err_config:
   free((char *)g_ps.config.host);
@@ -303,7 +305,11 @@ void purespice_disconnect(void)
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
     channel_internal_disconnect(&g_ps.channels[i]);
 
-  close(g_ps.epollfd);
+  if (g_ps.epollfd >= 0)
+  {
+    close(g_ps.epollfd);
+    g_ps.epollfd = -1;
+  }
 
   if (g_ps.motionBuffer)
   {
