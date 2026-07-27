@@ -65,7 +65,7 @@ const SpiceLinkHeader * channelDisplay_getConnectPacket(void)
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
   COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
 
-  DISPLAY_SET_CAPABILITY(p.supportCaps, SPICE_DISPLAY_CAP_PREF_COMPRESSION);
+  DISPLAY_SET_CAPABILITY(p.channelCaps, SPICE_DISPLAY_CAP_PREF_COMPRESSION);
 
   return &p.header;
 }
