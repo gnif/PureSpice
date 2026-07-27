@@ -258,6 +258,8 @@ void channel_internal_disconnect(PSChannel * channel)
 
   epoll_ctl(g_ps.epollfd, EPOLL_CTL_DEL, channel->socket, NULL);
   shutdown(channel->socket, SHUT_WR);
+  close(channel->socket);
+  channel->socket = -1;
 
   channel->bufferRead = 0;
   channel->headerRead = 0;
