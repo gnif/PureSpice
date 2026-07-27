@@ -19,6 +19,8 @@
  */
 
 #include "purespice.h"
+#include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 #include "ps.h"
@@ -101,160 +103,271 @@ PS_STATUS channelDisplay_onConnect(PSChannel * channel)
   return PS_STATUS_OK;
 }
 
-static void resolveDisplayBase(uint8_t ** ptr, SpiceMsgDisplayBase * base)
+struct DisplayReader
 {
-  memcpy(&base->surface_id, *ptr, sizeof(base->surface_id));
-  *ptr += sizeof(base->surface_id);
+  PSChannel * channel;
+  size_t      offset;
+};
 
-  memcpy(&base->box, *ptr, sizeof(base->box));
-  *ptr += sizeof(base->box);
+static bool displayRead(struct DisplayReader * reader, void * dst,
+    size_t length, const char * field)
+{
+  if (!channel_validateRange(reader->channel, reader->offset, length, field))
+    return false;
 
-  memcpy(&base->clip.type, *ptr, sizeof(base->clip.type));
-  *ptr += sizeof(base->clip.type);
+  memcpy(dst, reader->channel->buffer + reader->offset, length);
+  reader->offset += length;
+  return true;
+}
 
-  if (base->clip.type == SPICE_CLIP_TYPE_RECTS)
+static bool displayOffset(struct DisplayReader * reader, uint32_t offset,
+    size_t minimum, const uint8_t ** dst, const char * field)
+{
+  if (!offset)
   {
-    base->clip.rects = (SpiceClipRects *)*ptr;
-    *ptr += sizeof(base->clip.rects->num_rects);
-    *ptr += base->clip.rects->num_rects * sizeof(SpiceRect);
+    *dst = NULL;
+    return true;
+  }
+
+  if (!channel_validateRange(reader->channel, offset, minimum, field))
+    return false;
+
+  *dst = reader->channel->buffer + offset;
+  return true;
+}
+
+static bool resolveDisplayBase(
+    struct DisplayReader * reader, SpiceMsgDisplayBase * base)
+{
+  if (!displayRead(reader, &base->surface_id,
+        sizeof(base->surface_id), "display surface id") ||
+      !displayRead(reader, &base->box,
+        sizeof(base->box), "display destination box") ||
+      !displayRead(reader, &base->clip.type,
+        sizeof(base->clip.type), "display clip type"))
+    return false;
+
+  base->clip.rects = NULL;
+  switch(base->clip.type)
+  {
+    case SPICE_CLIP_TYPE_NONE:
+      return true;
+
+    case SPICE_CLIP_TYPE_RECTS:
+    {
+      const size_t rectsOffset = reader->offset;
+      uint32_t count;
+      if (!displayRead(reader, &count, sizeof(count), "display clip count"))
+        return false;
+
+      const size_t available =
+        reader->channel->header.size - reader->offset;
+      if (count > available / sizeof(SpiceRect))
+      {
+        PS_LOG_ERROR("DISPLAY: clip rectangle count exceeds its payload");
+        return false;
+      }
+
+      base->clip.rects =
+        (SpiceClipRects *)(reader->channel->buffer + rectsOffset);
+      reader->offset += (size_t)count * sizeof(SpiceRect);
+      return true;
+    }
+
+    default:
+      PS_LOG_ERROR("DISPLAY: unknown clip type: %u", base->clip.type);
+      return false;
   }
 }
 
-static void resolveSpicePoint(uint8_t ** ptr, SpicePoint * dst)
-{
-  memcpy(dst, *ptr, sizeof(*dst));
-  *ptr += sizeof(*dst);
-}
-
-static void resolveSpicePalette(const uint8_t * data, uint8_t ** ptr,
-    SpicePalette ** dst, uint64_t *dst_id)
+static bool resolveSpiceImage(
+    struct DisplayReader * reader, SpiceImage ** dst)
 {
   uint32_t offset;
-  memcpy(&offset, *ptr, sizeof(offset));
-  *ptr += sizeof(offset);
+  if (!displayRead(reader, &offset, sizeof(offset), "display image offset"))
+    return false;
 
-  if (offset)
-  {
-    *dst = (SpicePalette *)(data + offset);
-    memcpy(dst_id, *ptr, sizeof(*dst_id));
-    *ptr += sizeof(*dst_id);
-  }
-  else
-  {
-    *dst    = NULL;
-    *dst_id = 0;
-  }
+  const uint8_t * image;
+  if (!displayOffset(reader, offset, sizeof(SpiceImageDescriptor),
+        &image, "display image"))
+    return false;
+
+  *dst = (SpiceImage *)image;
+  return true;
 }
 
-static void resolveSpiceImage(const uint8_t * data, uint8_t ** ptr,
-    SpiceImage ** dst)
+static bool resolveSpicePalette(struct DisplayReader * reader,
+    SpicePalette ** dst, uint64_t * dstId)
 {
   uint32_t offset;
-  memcpy(&offset, *ptr, sizeof(offset));
-  *ptr += sizeof(offset);
-  *dst  = (SpiceImage *)(offset > 0 ? data + offset : NULL);
+  if (!displayRead(reader, &offset, sizeof(offset), "display palette offset"))
+    return false;
+
+  if (!offset)
+  {
+    *dst   = NULL;
+    *dstId = 0;
+    return true;
+  }
+
+  const uint8_t * palette;
+  if (!displayOffset(reader, offset, offsetof(SpicePalette, ents),
+        &palette, "display palette"))
+    return false;
+  *dst = (SpicePalette *)palette;
+
+  uint16_t entries;
+  memcpy(&entries,
+      reader->channel->buffer + offset + offsetof(SpicePalette, num_ents),
+      sizeof(entries));
+  if (!channel_validateRange(reader->channel, offset,
+        offsetof(SpicePalette, ents) + (size_t)entries * sizeof(uint32_t),
+        "display palette entries"))
+    return false;
+
+  return displayRead(
+      reader, dstId, sizeof(*dstId), "display palette cache id");
 }
 
-static void resolveSpiceQMask(const uint8_t * data, uint8_t **ptr,
-    SpiceQMask * dst)
+static bool resolveSpiceQMask(
+    struct DisplayReader * reader, SpiceQMask * dst)
 {
-  const int copy =
-    sizeof(dst->flags) +
-    sizeof(dst->pos  );
-
-  memcpy(dst, *ptr, copy);
-  *ptr += copy;
-
-  resolveSpiceImage(data, ptr, &dst->bitmap);
+  return
+    displayRead(reader, &dst->flags, sizeof(dst->flags), "display mask flags") &&
+    displayRead(reader, &dst->pos  , sizeof(dst->pos  ), "display mask position") &&
+    resolveSpiceImage(reader, &dst->bitmap);
 }
 
-static void resolveSpiceCopy(const uint8_t * data, uint8_t ** ptr,
-    SpiceCopy * dst)
+static bool resolveSpiceCopy(
+    struct DisplayReader * reader, SpiceCopy * dst)
 {
-  resolveSpiceImage(data, ptr, &dst->src_bitmap);
-
-  memcpy(&dst->meta, *ptr, sizeof(dst->meta));
-  *ptr += sizeof(dst->meta);
-
-  resolveSpiceQMask(data, ptr, &dst->mask);
+  return
+    resolveSpiceImage(reader, &dst->src_bitmap) &&
+    displayRead(reader, &dst->meta, sizeof(dst->meta), "display copy metadata") &&
+    resolveSpiceQMask(reader, &dst->mask);
 }
 
-static void resolveSpicePattern(const uint8_t * data, uint8_t **ptr,
-    SpicePattern * dst)
+static bool resolveSpicePattern(
+    struct DisplayReader * reader, SpicePattern * dst)
 {
-  resolveSpiceImage(data, ptr, &dst->pat);
-  resolveSpicePoint(      ptr, &dst->pos);
+  return
+    resolveSpiceImage(reader, &dst->pat) &&
+    displayRead(reader, &dst->pos, sizeof(dst->pos), "display pattern position");
 }
 
-static void resolveSpiceBrush(const uint8_t * data, uint8_t **ptr,
-    SpiceBrush * dst)
+static bool resolveSpiceBrush(
+    struct DisplayReader * reader, SpiceBrush * dst)
 {
-  memcpy(&dst->type, *ptr, sizeof(dst->type));
-  *ptr += sizeof(dst->type);
+  if (!displayRead(
+        reader, &dst->type, sizeof(dst->type), "display brush type"))
+    return false;
 
   switch(dst->type)
   {
     case SPICE_BRUSH_TYPE_NONE:
-      return;
+      return true;
 
     case SPICE_BRUSH_TYPE_SOLID:
-      memcpy(&dst->u.color, *ptr, sizeof(dst->u.color));
-      *ptr += sizeof(dst->u.color);
-      return;
+      return displayRead(reader, &dst->u.color,
+          sizeof(dst->u.color), "display brush color");
 
     case SPICE_BRUSH_TYPE_PATTERN:
-      resolveSpicePattern(data, ptr, &dst->u.pattern);
-      return;
+      return resolveSpicePattern(reader, &dst->u.pattern);
+
+    default:
+      PS_LOG_ERROR("DISPLAY: unknown brush type: %u", dst->type);
+      return false;
   }
 }
 
-static void resolveSpiceFill(const uint8_t * data, uint8_t **ptr,
-    SpiceFill * dst)
+static bool resolveSpiceFill(
+    struct DisplayReader * reader, SpiceFill * dst)
 {
-  resolveSpiceBrush(data, ptr, &dst->brush);
-
-  memcpy(&dst->rop_descriptor, *ptr, sizeof(dst->rop_descriptor));
-  *ptr += sizeof(dst->rop_descriptor);
-
-  resolveSpiceQMask(data, ptr, &dst->mask);
+  return
+    resolveSpiceBrush(reader, &dst->brush) &&
+    displayRead(reader, &dst->rop_descriptor,
+        sizeof(dst->rop_descriptor), "display fill ROP") &&
+    resolveSpiceQMask(reader, &dst->mask);
 }
 
-static void readSpiceBitmap(const uint8_t * data, const SpiceImage * img,
-    SpiceBitmap * dst)
+static bool readSpiceBitmap(PSChannel * channel,
+    const SpiceImage * image, SpiceBitmap * dst)
 {
-  uint8_t * ptr = (uint8_t *)&img->u.bitmap;
+  const size_t imageOffset = (const uint8_t *)image - channel->buffer;
+  struct DisplayReader reader =
+  {
+    .channel = channel,
+    .offset  = imageOffset + sizeof(SpiceImageDescriptor)
+  };
 
-  const int copy =
-      sizeof(dst->format) +
-      sizeof(dst->flags ) +
-      sizeof(dst->x     ) +
-      sizeof(dst->y     ) +
-      sizeof(dst->stride);
+  if (!displayRead(&reader, &dst->format, sizeof(dst->format), "bitmap format") ||
+      !displayRead(&reader, &dst->flags , sizeof(dst->flags ), "bitmap flags") ||
+      !displayRead(&reader, &dst->x     , sizeof(dst->x     ), "bitmap width") ||
+      !displayRead(&reader, &dst->y     , sizeof(dst->y     ), "bitmap height") ||
+      !displayRead(&reader, &dst->stride, sizeof(dst->stride), "bitmap stride") ||
+      !resolveSpicePalette(&reader, &dst->palette, &dst->palette_id))
+    return false;
 
-  memcpy(dst, ptr, copy);
-  ptr += copy;
+  if (dst->format != SPICE_BITMAP_FMT_32BIT &&
+      dst->format != SPICE_BITMAP_FMT_RGBA)
+  {
+    PS_LOG_ERROR("DISPLAY: unsupported bitmap format: %u", dst->format);
+    return false;
+  }
 
-  resolveSpicePalette(data, &ptr, &dst->palette, &dst->palette_id);
-  dst->data = ptr;
+  if (dst->x > INT_MAX || dst->y > INT_MAX || dst->stride > INT_MAX ||
+      dst->x > dst->stride / 4)
+  {
+    PS_LOG_ERROR("DISPLAY: invalid bitmap dimensions or stride "
+        "(%ux%u, stride: %u)", dst->x, dst->y, dst->stride);
+    return false;
+  }
+
+  if (dst->y && dst->stride > SIZE_MAX / dst->y)
+  {
+    PS_LOG_ERROR("DISPLAY: bitmap byte size overflows");
+    return false;
+  }
+
+  const size_t bitmapSize = (size_t)dst->stride * dst->y;
+  if (!channel_validateRange(
+        channel, reader.offset, bitmapSize, "display bitmap data"))
+    return false;
+
+  dst->data = channel->buffer + reader.offset;
+  return true;
 }
 
-static void resolveDisplayDrawCopy(uint8_t * data, SpiceMsgDisplayDrawCopy * dst)
+static bool resolveDisplayDrawCopy(
+    PSChannel * channel, SpiceMsgDisplayDrawCopy * dst)
 {
-  uint8_t * ptr = data;
-  resolveDisplayBase(      &ptr, &dst->base);
-  resolveSpiceCopy  (data, &ptr, &dst->data);
+  struct DisplayReader reader = { .channel = channel, .offset = 0 };
+  return
+    resolveDisplayBase(&reader, &dst->base) &&
+    resolveSpiceCopy(&reader, &dst->data);
 }
 
-static void resolveDisplayDrawFill(uint8_t * data, SpiceMsgDisplayDrawFill * dst)
+static bool resolveDisplayDrawFill(
+    PSChannel * channel, SpiceMsgDisplayDrawFill * dst)
 {
-  uint8_t * ptr = data;
-  resolveDisplayBase(      &ptr, &dst->base);
-  resolveSpiceFill  (data, &ptr, &dst->data);
+  struct DisplayReader reader = { .channel = channel, .offset = 0 };
+  return
+    resolveDisplayBase(&reader, &dst->base) &&
+    resolveSpiceFill(&reader, &dst->data);
 }
 
 static PS_STATUS onMessage_displaySurfaceCreate(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgSurfaceCreate), "DISPLAY_SURFACE_CREATE"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgSurfaceCreate * msg = (SpiceMsgSurfaceCreate *)channel->buffer;
+  if (msg->width > INT_MAX || msg->height > INT_MAX)
+  {
+    PS_LOG_ERROR("DISPLAY: surface dimensions exceed the client API");
+    return PS_STATUS_ERROR;
+  }
 
   PSSurfaceFormat fmt;
   switch((SpiceSurfaceFmt)msg->format)
@@ -279,6 +392,10 @@ static PS_STATUS onMessage_displaySurfaceCreate(PSChannel * channel)
 
 static PS_STATUS onMessage_displaySurfaceDestroy(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgSurfaceDestroy), "DISPLAY_SURFACE_DESTROY"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgSurfaceDestroy * msg = (SpiceMsgSurfaceDestroy *)channel->buffer;
 
   g_ps.config.display.surfaceDestroy(msg->surface_id);
@@ -288,7 +405,8 @@ static PS_STATUS onMessage_displaySurfaceDestroy(PSChannel * channel)
 static PS_STATUS onMessage_displayDrawFill(PSChannel * channel)
 {
   SpiceMsgDisplayDrawFill dst;
-  resolveDisplayDrawFill(channel->buffer, &dst);
+  if (!resolveDisplayDrawFill(channel, &dst))
+    return PS_STATUS_ERROR;
 
   if (dst.data.brush.type != SPICE_BRUSH_TYPE_SOLID)
   {
@@ -296,12 +414,22 @@ static PS_STATUS onMessage_displayDrawFill(PSChannel * channel)
     return PS_STATUS_OK;
   }
 
+  const int64_t width  = (int64_t)dst.base.box.right -
+    dst.base.box.left;
+  const int64_t height = (int64_t)dst.base.box.bottom -
+    dst.base.box.top;
+  if (width < 0 || width > INT_MAX || height < 0 || height > INT_MAX)
+  {
+    PS_LOG_ERROR("DISPLAY: invalid fill destination rectangle");
+    return PS_STATUS_ERROR;
+  }
+
   g_ps.config.display.drawFill(
       dst.base.surface_id,
       dst.base.box.left,
       dst.base.box.top,
-      dst.base.box.right  - dst.base.box.left,
-      dst.base.box.bottom - dst.base.box.top,
+      width,
+      height,
       dst.data.brush.u.color);
   return PS_STATUS_OK;
 }
@@ -309,7 +437,18 @@ static PS_STATUS onMessage_displayDrawFill(PSChannel * channel)
 static PS_STATUS onMessage_displayDrawCopy(PSChannel * channel)
 {
   SpiceMsgDisplayDrawCopy dst;
-  resolveDisplayDrawCopy(channel->buffer, &dst);
+  if (!resolveDisplayDrawCopy(channel, &dst))
+    return PS_STATUS_ERROR;
+
+  const int64_t width  = (int64_t)dst.base.box.right -
+    dst.base.box.left;
+  const int64_t height = (int64_t)dst.base.box.bottom -
+    dst.base.box.top;
+  if (width < 0 || width > INT_MAX || height < 0 || height > INT_MAX)
+  {
+    PS_LOG_ERROR("DISPLAY: invalid copy destination rectangle");
+    return PS_STATUS_ERROR;
+  }
 
   // we only support bitmaps for now
   if (!dst.data.src_bitmap)
@@ -323,7 +462,9 @@ static PS_STATUS onMessage_displayDrawCopy(PSChannel * channel)
     case SPICE_IMAGE_TYPE_BITMAP:
     {
       SpiceBitmap bmp;
-      readSpiceBitmap(channel->buffer, dst.data.src_bitmap, &bmp);
+      if (!readSpiceBitmap(channel, dst.data.src_bitmap, &bmp))
+        return PS_STATUS_ERROR;
+
       const bool topDown = bmp.flags & SPICE_BITMAP_FLAGS_TOP_DOWN;
       g_ps.config.display.drawBitmap(
           dst.base.surface_id,

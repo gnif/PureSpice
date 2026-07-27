@@ -72,6 +72,10 @@ const SpiceLinkHeader * channelPlayback_getConnectPacket(void)
 
 static PS_STATUS onMessage_playbackStart(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgPlaybackStart), "PLAYBACK_START"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgPlaybackStart * msg = (SpiceMsgPlaybackStart *)channel->buffer;
 
   PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
@@ -84,6 +88,10 @@ static PS_STATUS onMessage_playbackStart(PSChannel * channel)
 
 static PS_STATUS onMessage_playbackData(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgPlaybackPacket), "PLAYBACK_DATA"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgPlaybackPacket * msg = (SpiceMsgPlaybackPacket *)channel->buffer;
 
   g_ps.config.playback.data(msg->data, channel->header.size - sizeof(*msg));
@@ -99,10 +107,20 @@ static PS_STATUS onMessage_playbackStop(PSChannel * channel)
 
 static PS_STATUS onMessage_playbackVolume(PSChannel * channel)
 {
-  SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgAudioVolume), "PLAYBACK_VOLUME"))
+    return PS_STATUS_ERROR;
 
-  uint16_t volume[msg->nchannels];
-  memcpy(&volume, msg->volume, sizeof(volume));
+  SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
+  const size_t available = channel->header.size - sizeof(*msg);
+  if (msg->nchannels > available / sizeof(msg->volume[0]))
+  {
+    PS_LOG_ERROR("PLAYBACK: volume channel count exceeds its payload");
+    return PS_STATUS_ERROR;
+  }
+
+  uint16_t volume[UINT8_MAX + 1];
+  memcpy(volume, msg->volume, sizeof(volume[0]) * msg->nchannels);
 
   g_ps.config.playback.volume(msg->nchannels, volume);
   return PS_STATUS_OK;
@@ -110,6 +128,10 @@ static PS_STATUS onMessage_playbackVolume(PSChannel * channel)
 
 static PS_STATUS onMessage_playbackMute(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgAudioMute), "PLAYBACK_MUTE"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgAudioMute * msg = (SpiceMsgAudioMute *)channel->buffer;
 
   g_ps.config.playback.mute(msg->mute);

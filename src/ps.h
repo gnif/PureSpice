@@ -39,6 +39,11 @@
 // possible number
 #define SPICE_AGENT_TOKENS_MAX ~0
 
+/* Raw display bitmaps can be large, especially at 8K. Keep enough headroom for
+ * those while preventing a wire-provided length from requesting an effectively
+ * unbounded allocation. */
+#define SPICE_MAX_MESSAGE_SIZE (256U * 1024U * 1024U)
+
 #define _SPICE_RAW_PACKET(htype, dataSize, extraData, _alloc) \
 ({ \
   uint8_t * packet = _alloc(sizeof(ssize_t) + \

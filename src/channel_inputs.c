@@ -69,6 +69,9 @@ const SpiceLinkHeader * channelInputs_getConnectPacket(void)
 
 static PS_STATUS onMessage_inputsInit(PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgInputsInit), "INPUTS_INIT"))
+    return PS_STATUS_ERROR;
+
   channel->initDone = true;
   //SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
 
@@ -77,6 +80,10 @@ static PS_STATUS onMessage_inputsInit(PSChannel * channel)
 
 static PS_STATUS onMessage_inputsKeyModifiers(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgInputsKeyModifiers), "INPUTS_KEY_MODIFIERS"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
   g_ps.kb.modifiers = msg->modifiers;
   return PS_STATUS_OK;

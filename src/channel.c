@@ -306,6 +306,9 @@ bool channel_validateRange(const PSChannel * channel, size_t offset,
 
 static PS_STATUS onMessage_setAck(PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgSetAck), "SET_ACK"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgSetAck * msg = (SpiceMsgSetAck *)channel->buffer;
 
   channel->ackFrequency = msg->window;
@@ -320,6 +323,9 @@ static PS_STATUS onMessage_setAck(PSChannel * channel)
 
 static PS_STATUS onMessage_ping(PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgPing), "PING"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgPing * msg = (SpiceMsgPing *)channel->buffer;
 
   SpiceMsgcPong * out =
@@ -338,6 +344,10 @@ static PS_STATUS onMessage_ping(PSChannel * channel)
 
 static PS_STATUS onMessage_disconnecting(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgcDisconnecting), "DISCONNECTING"))
+    return PS_STATUS_ERROR;
+
   shutdown(channel->socket, SHUT_WR);
   PS_LOG_INFO("Server sent disconnect message");
   return PS_STATUS_HANDLED;
@@ -345,7 +355,18 @@ static PS_STATUS onMessage_disconnecting(PSChannel * channel)
 
 static PS_STATUS onMessage_notify(PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgNotify), "NOTIFY"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgNotify * msg = (SpiceMsgNotify *)channel->buffer;
+  const size_t available = channel->header.size - sizeof(*msg);
+  if (msg->message_len >= available ||
+      msg->message[msg->message_len] != '\0')
+  {
+    PS_LOG_ERROR("%s: NOTIFY message string is not contained in the payload",
+        channel->name);
+    return PS_STATUS_ERROR;
+  }
 
   PS_LOG_INFO("[notify] %s", msg->message);
   return PS_STATUS_OK;

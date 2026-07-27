@@ -163,11 +163,31 @@ PS_STATUS agent_process(PSChannel * channel)
   }
 
 
+  if (!channel_validatePayload(
+        channel, sizeof(VDAgentMessage), "MAIN_AGENT_DATA"))
+    return PS_STATUS_ERROR;
+
   uint8_t        * data     = channel->buffer;
   unsigned int     dataSize = channel->header.size;
   VDAgentMessage * msg      = (VDAgentMessage *)data;
   data     += sizeof(*msg);
   dataSize -= sizeof(*msg);
+
+  if (msg->size > SPICE_MAX_MESSAGE_SIZE)
+  {
+    PS_LOG_ERROR("VDAgent message is too large (%u bytes, maximum %u)",
+        msg->size, SPICE_MAX_MESSAGE_SIZE);
+    return PS_STATUS_ERROR;
+  }
+
+  if (dataSize > msg->size)
+  {
+    PS_LOG_ERROR(
+        "VDAgent fragment exceeds its declared payload "
+        "(fragment: %u, payload: %u)",
+        dataSize, msg->size);
+    return PS_STATUS_ERROR;
+  }
 
   if (msg->protocol != VD_AGENT_PROTOCOL)
   {
@@ -180,6 +200,15 @@ PS_STATUS agent_process(PSChannel * channel)
   {
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
     {
+      if (msg->size < sizeof(VDAgentAnnounceCapabilities) ||
+          msg->size > dataSize ||
+          (msg->size - sizeof(VDAgentAnnounceCapabilities)) %
+            sizeof(uint32_t) != 0)
+      {
+        PS_LOG_ERROR("Invalid VDAgent capabilities payload");
+        return PS_STATUS_ERROR;
+      }
+
       VDAgentAnnounceCapabilities * caps = (VDAgentAnnounceCapabilities *)data;
       const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg->size);
 
@@ -207,15 +236,15 @@ PS_STATUS agent_process(PSChannel * channel)
       // all clipboard messages might have this
       if (agent.cbSelection)
       {
-        if (dataSize < sizeof(struct Selection))
+        if (msg->size < sizeof(struct Selection) ||
+            dataSize < sizeof(struct Selection))
         {
           PS_LOG_ERROR("Agent clipboard message is missing its selection");
           return PS_STATUS_ERROR;
         }
 
-        struct Selection * selection = (struct Selection *)data;
-        data     += sizeof(*selection);
-        dataSize -= sizeof(*selection);
+        data     += sizeof(struct Selection);
+        dataSize -= sizeof(struct Selection);
       }
 
       switch(msg->type)
@@ -234,9 +263,8 @@ PS_STATUS agent_process(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          uint32_t * type = (uint32_t *)data;
-          data     += sizeof(*type);
-          dataSize -= sizeof(*type);
+          data     += sizeof(uint32_t);
+          dataSize -= sizeof(uint32_t);
 
           if (agent.cbBuffer)
           {
@@ -246,7 +274,7 @@ PS_STATUS agent_process(PSChannel * channel)
           }
 
           const unsigned int prefixSize =
-            sizeof(*type) +
+            sizeof(uint32_t) +
             (agent.cbSelection ? sizeof(struct Selection) : 0);
           if (msg->size < prefixSize)
           {
@@ -283,8 +311,15 @@ PS_STATUS agent_process(PSChannel * channel)
 
         case VD_AGENT_CLIPBOARD_REQUEST:
         {
+          if (msg->size < sizeof(uint32_t) +
+                (agent.cbSelection ? sizeof(struct Selection) : 0) ||
+              dataSize < sizeof(uint32_t))
+          {
+            PS_LOG_ERROR("Agent clipboard request is missing its data type");
+            return PS_STATUS_ERROR;
+          }
+
           uint32_t * type = (uint32_t *)data;
-          data += sizeof(type);
 
           if (g_ps.config.clipboard.enable)
             g_ps.config.clipboard.request(agentTypeToPSType(*type));
@@ -293,8 +328,15 @@ PS_STATUS agent_process(PSChannel * channel)
 
         case VD_AGENT_CLIPBOARD_GRAB:
         {
+          if (msg->size < sizeof(uint32_t) +
+                (agent.cbSelection ? sizeof(struct Selection) : 0) ||
+              dataSize < sizeof(uint32_t))
+          {
+            PS_LOG_ERROR("Agent clipboard grab contains no data types");
+            return PS_STATUS_ERROR;
+          }
+
           uint32_t *types = (uint32_t *)data;
-          data += sizeof(*types);
 
           // there is zero documentation on the types field, it might be a
           // bitfield but for now we are going to assume it's not.

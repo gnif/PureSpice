@@ -25,6 +25,7 @@
 #include "channel.h"
 #include "channel_cursor.h"
 
+#include <stddef.h>
 #include <stdlib.h>
 
 #include "messages.h"
@@ -115,13 +116,27 @@ static struct PSCursorImage * loadCursor(uint64_t id)
   return NULL;
 }
 
-static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
+static struct PSCursorImage * convertCursor(
+    SpiceCursor * cursor, size_t available, bool * valid)
 {
-  if (cursor->flags & SPICE_CURSOR_FLAGS_NONE)
+  *valid = false;
+  if (available < sizeof(*cursor))
+  {
+    PS_LOG_ERROR("Cursor message is missing its cursor header");
     return NULL;
+  }
+
+  if (cursor->flags & SPICE_CURSOR_FLAGS_NONE)
+  {
+    *valid = true;
+    return NULL;
+  }
 
   if (cursor->flags & SPICE_CURSOR_FLAGS_FROM_CACHE)
+  {
+    *valid = true;
     return loadCursor(cursor->header.unique);
+  }
 
   if (cursor->header.width > 512 || cursor->header.height > 512)
   {
@@ -131,20 +146,48 @@ static struct PSCursorImage * convertCursor(SpiceCursor * cursor)
   }
 
   size_t bufferSize = cursorBufferSize(&cursor->header);
+  if (!bufferSize)
+  {
+    PS_LOG_ERROR("Unsupported cursor type: %u", cursor->header.type);
+    return NULL;
+  }
+
+  if (bufferSize > available - sizeof(*cursor))
+  {
+    PS_LOG_ERROR("Cursor image exceeds its message payload "
+        "(image: %zu, available: %zu)",
+        bufferSize, available - sizeof(*cursor));
+    return NULL;
+  }
+
   struct PSCursorImage * node = malloc(sizeof(struct PSCursorImage) + bufferSize);
+  if (!node)
+  {
+    PS_LOG_ERROR("Failed to allocate cursor image");
+    return NULL;
+  }
 
   node->cached = cursor->flags & SPICE_CURSOR_FLAGS_CACHE_ME;
   memcpy(&node->header, &cursor->header, sizeof(node->header));
   memcpy(node->buffer, cursor->data, bufferSize);
 
-  if (node->cached)
-  {
-    node->next             = NULL;
-    *g_ps.cursor.cacheLast = node;
-    g_ps.cursor.cacheLast  = &node->next;
-  }
-
+  *valid = true;
   return node;
+}
+
+static void cacheCursor(struct PSCursorImage * node)
+{
+  if (!node || !node->cached)
+    return;
+
+  for(struct PSCursorImage * cached = g_ps.cursor.cache;
+      cached; cached = cached->next)
+    if (cached == node)
+      return;
+
+  node->next             = NULL;
+  *g_ps.cursor.cacheLast = node;
+  g_ps.cursor.cacheLast  = &node->next;
 }
 
 static void clearCursorCache(void)
@@ -217,7 +260,17 @@ static void updateCursorTrail(void)
 
 static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 {
+  const size_t cursorOffset = offsetof(SpiceMsgCursorInit, cursor);
+  if (!channel_validatePayload(
+        channel, cursorOffset + sizeof(SpiceCursor), "CURSOR_INIT"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgCursorInit * msg = (SpiceMsgCursorInit *)channel->buffer;
+  bool valid;
+  struct PSCursorImage * image = convertCursor(
+      &msg->cursor, channel->header.size - cursorOffset, &valid);
+  if (!valid)
+    return PS_STATUS_ERROR;
 
   g_ps.cursor.x         = msg->position.x;
   g_ps.cursor.y         = msg->position.y;
@@ -227,7 +280,8 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 
   g_ps.cursor.cache     = NULL;
   g_ps.cursor.cacheLast = &g_ps.cursor.cache;
-  g_ps.cursor.current   = convertCursor(&msg->cursor);
+  g_ps.cursor.current   = image;
+  cacheCursor(image);
 
   if (!g_ps.cursor.current)
     g_ps.cursor.visible = false;
@@ -253,7 +307,17 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
 
 static PS_STATUS onMessage_cursorSet(PSChannel * channel)
 {
+  const size_t cursorOffset = offsetof(SpiceMsgCursorSet, cursor);
+  if (!channel_validatePayload(
+        channel, cursorOffset + sizeof(SpiceCursor), "CURSOR_SET"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgCursorSet * msg = (SpiceMsgCursorSet *)channel->buffer;
+  bool valid;
+  struct PSCursorImage * image = convertCursor(
+      &msg->cursor, channel->header.size - cursorOffset, &valid);
+  if (!valid)
+    return PS_STATUS_ERROR;
 
   g_ps.cursor.x       = msg->position.x;
   g_ps.cursor.y       = msg->position.y;
@@ -262,7 +326,8 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
   if (g_ps.cursor.current && !g_ps.cursor.current->cached)
     free(g_ps.cursor.current);
 
-  g_ps.cursor.current = convertCursor(&msg->cursor);
+  g_ps.cursor.current = image;
+  cacheCursor(image);
 
   if (!g_ps.cursor.current)
     g_ps.cursor.visible = false;
@@ -275,6 +340,10 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
 
 static PS_STATUS onMessage_cursorMove(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgCursorMove), "CURSOR_MOVE"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgCursorMove * msg = (SpiceMsgCursorMove *)channel->buffer;
 
   g_ps.cursor.x = msg->position.x;
@@ -296,6 +365,10 @@ static PS_STATUS onMessage_cursorHide(PSChannel * channel)
 
 static PS_STATUS onMessage_cursorTrail(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgCursorTrail), "CURSOR_TRAIL"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgCursorTrail * msg = (SpiceMsgCursorTrail *)channel->buffer;
 
   g_ps.cursor.trailLen  = msg->length;
@@ -307,6 +380,10 @@ static PS_STATUS onMessage_cursorTrail(PSChannel * channel)
 
 static PS_STATUS onMessage_cursorInvalOne(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgCursorInvalOne), "CURSOR_INVAL_ONE"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgCursorInvalOne * msg = (SpiceMsgCursorInvalOne *)channel->buffer;
 
   struct PSCursorImage ** prev = &g_ps.cursor.cache;
@@ -340,11 +417,24 @@ static PS_STATUS onMessage_cursorInvalAll(PSChannel * channel)
 
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
-  channel->initDone = true;
+  if (!channel->initDone)
+  {
+    if (channel->header.type == SPICE_MSG_CURSOR_INIT)
+    {
+      channel->initDone = true;
+      return onMessage_cursorInit;
+    }
+
+    PS_LOG_ERROR("Expected SPICE_MSG_CURSOR_INIT but got %u",
+        channel->header.type);
+    return PS_HANDLER_ERROR;
+  }
+
   switch(channel->header.type)
   {
     case SPICE_MSG_CURSOR_INIT:
-      return onMessage_cursorInit;
+      PS_LOG_ERROR("Unexpected SPICE_MSG_CURSOR_INIT");
+      return PS_HANDLER_ERROR;
 
     case SPICE_MSG_CURSOR_RESET:
       return onMessage_cursorReset;

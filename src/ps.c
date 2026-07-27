@@ -410,6 +410,13 @@ PSStatus purespice_process(int timeout)
         if (channel->headerRead < sizeof(SpiceMiniDataHeader))
           continue;
 
+        if (channel->header.size > SPICE_MAX_MESSAGE_SIZE)
+        {
+          PS_LOG_ERROR("%s: message payload is too large (%u bytes, maximum %u)",
+              channel->name, channel->header.size, SPICE_MAX_MESSAGE_SIZE);
+          return PS_STATUS_ERR_READ;
+        }
+
         // ack that we got the message
         if (!channel_ack(channel))
         {
@@ -441,13 +448,13 @@ PSStatus purespice_process(int timeout)
           // ensure we have a large enough buffer to read the entire message
           if (channel->bufferSize < channel->header.size)
           {
-            free(channel->buffer);
-            channel->buffer = malloc(channel->header.size);
-            if (!channel->buffer)
+            uint8_t * buffer = realloc(channel->buffer, channel->header.size);
+            if (!buffer)
             {
               PS_LOG_ERROR("out of memory");
               return PS_STATUS_ERR_READ;
             }
+            channel->buffer = buffer;
             channel->bufferSize = channel->header.size;
           }
         }
@@ -489,11 +496,11 @@ PSStatus purespice_process(int timeout)
       else
       {
         // read the payload into the buffer
-        int size = channel->header.size - channel->bufferRead;
+        size_t size = channel->header.size - channel->bufferRead;
         if (size)
         {
-          if (size > dataAvailable)
-            size = dataAvailable;
+          if (size > (size_t)dataAvailable)
+            size = (size_t)dataAvailable;
           ssize_t len = read(channel->socket,
               channel->buffer + channel->bufferRead, size);
 

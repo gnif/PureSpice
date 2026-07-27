@@ -72,6 +72,10 @@ const SpiceLinkHeader * channelRecord_getConnectPacket(void)
 
 static PS_STATUS onMessage_recordStart(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgRecordStart), "RECORD_START"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgRecordStart * msg = (SpiceMsgRecordStart *)channel->buffer;
 
   PSAudioFormat fmt = PS_AUDIO_FMT_INVALID;
@@ -92,10 +96,20 @@ static PS_STATUS onMessage_recordStop(PSChannel * channel)
 
 static PS_STATUS onMessage_recordVolume(PSChannel * channel)
 {
-  SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgAudioVolume), "RECORD_VOLUME"))
+    return PS_STATUS_ERROR;
 
-  uint16_t volume[msg->nchannels];
-  memcpy(&volume, msg->volume, sizeof(volume));
+  SpiceMsgAudioVolume * msg = (SpiceMsgAudioVolume *)channel->buffer;
+  const size_t available = channel->header.size - sizeof(*msg);
+  if (msg->nchannels > available / sizeof(msg->volume[0]))
+  {
+    PS_LOG_ERROR("RECORD: volume channel count exceeds its payload");
+    return PS_STATUS_ERROR;
+  }
+
+  uint16_t volume[UINT8_MAX + 1];
+  memcpy(volume, msg->volume, sizeof(volume[0]) * msg->nchannels);
 
   g_ps.config.record.volume(msg->nchannels, volume);
   return PS_STATUS_OK;
@@ -103,6 +117,10 @@ static PS_STATUS onMessage_recordVolume(PSChannel * channel)
 
 static PS_STATUS onMessage_recordMute(PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMsgAudioMute), "RECORD_MUTE"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgAudioMute * msg = (SpiceMsgAudioMute *)channel->buffer;
 
   g_ps.config.record.mute(msg->mute);

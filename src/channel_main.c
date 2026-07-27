@@ -128,6 +128,9 @@ static void checkReady(void)
 
 static PS_STATUS onMessage_mainInit(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgMainInit), "MAIN_INIT"))
+    return PS_STATUS_ERROR;
+
   channel->initDone = true;
 
   SpiceMsgMainInit * msg = (SpiceMsgMainInit *)channel->buffer;
@@ -164,13 +167,29 @@ static PS_STATUS onMessage_mainInit(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainName(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgMainName), "MAIN_NAME"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgMainName * msg = (SpiceMsgMainName *)channel->buffer;
-  PS_LOG_INFO("Guest name: %s", msg->name);
+  if (!channel_validateRange(
+        channel, sizeof(*msg), msg->name_len, "MAIN_NAME string"))
+    return PS_STATUS_ERROR;
+
+  char * name = malloc((size_t)msg->name_len + 1);
+  if (!name)
+  {
+    PS_LOG_ERROR("Failed to allocate the guest name");
+    return PS_STATUS_ERROR;
+  }
+
+  memcpy(name, msg->name, msg->name_len);
+  name[msg->name_len] = '\0';
+  PS_LOG_INFO("Guest name: %s", name);
 
   if (g_ps.guestName)
     free(g_ps.guestName);
 
-  g_ps.guestName = strdup((char *)msg->name);
+  g_ps.guestName = name;
   cm.hasName = true;
 
   checkReady();
@@ -179,6 +198,9 @@ static PS_STATUS onMessage_mainName(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainUUID(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(SpiceMsgMainUUID), "MAIN_UUID"))
+    return PS_STATUS_ERROR;
+
   SpiceMsgMainUUID * msg = (SpiceMsgMainUUID *)channel->buffer;
 
   PS_LOG_INFO("Guest UUID: "
@@ -197,7 +219,17 @@ static PS_STATUS onMessage_mainUUID(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(SpiceMainChannelsList), "MAIN_CHANNELS_LIST"))
+    return PS_STATUS_ERROR;
+
   SpiceMainChannelsList * msg = (SpiceMainChannelsList *)channel->buffer;
+  const size_t available = channel->header.size - sizeof(*msg);
+  if (msg->num_of_channels > available / sizeof(msg->channels[0]))
+  {
+    PS_LOG_ERROR("MAIN: channel list contains more entries than its payload");
+    return PS_STATUS_ERROR;
+  }
 
   for(int n = 0; n < PS_CHANNEL_MAX; ++n)
   {
@@ -256,6 +288,10 @@ static PS_STATUS onMessage_mainAgentConnected(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainAgentConnectedTokens(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(uint32_t), "MAIN_AGENT_CONNECTED_TOKENS"))
+    return PS_STATUS_ERROR;
+
   uint32_t num_tokens = *(uint32_t *)channel->buffer;
 
   agent_setServerTokens(num_tokens);
@@ -264,6 +300,10 @@ static PS_STATUS onMessage_mainAgentConnectedTokens(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainAgentDisconnected(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(
+        channel, sizeof(uint32_t), "MAIN_AGENT_DISCONNECTED"))
+    return PS_STATUS_ERROR;
+
   uint32_t error = *(uint32_t *)channel->buffer;
 
   agent_disconnect();
@@ -285,6 +325,9 @@ static PS_STATUS onMessage_mainAgentData(struct PSChannel * channel)
 
 static PS_STATUS onMessage_mainAgentToken(struct PSChannel * channel)
 {
+  if (!channel_validatePayload(channel, sizeof(uint32_t), "MAIN_AGENT_TOKEN"))
+    return PS_STATUS_ERROR;
+
   uint32_t num_tokens = *(uint32_t *)channel->buffer;
 
   agent_returnServerTokens(num_tokens);
