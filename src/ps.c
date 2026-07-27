@@ -112,6 +112,10 @@ void purespice_init(const PSInit * init)
 {
   if (init)
     memcpy(&g_ps.init, init, sizeof(*init));
+
+  for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+    g_ps.channels[i].socket = -1;
+
   log_init();
   g_ps.initialized = true;
 }
@@ -546,7 +550,11 @@ done_disconnect:
   g_ps.sessionID = 0;
 
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
-    close(g_ps.channels[i].socket);
+    if (g_ps.channels[i].socket >= 0)
+    {
+      close(g_ps.channels[i].socket);
+      g_ps.channels[i].socket = -1;
+    }
 
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
