@@ -29,6 +29,7 @@
 #include <alloca.h>
 #include <time.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -158,15 +159,42 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
-  const uint32_t * capsCommon =
-    (uint32_t *)((uint8_t *)reply + reply->caps_offset);
-  const uint32_t * capsChannel =
-    capsCommon + reply->num_common_caps;
+  const size_t capsOffset = reply->caps_offset;
+  if (capsOffset < sizeof(*reply) || capsOffset > header.size)
+  {
+    channel_internal_disconnectNL(channel);
+    PS_LOG_ERROR("SpiceLinkReply capability offset is outside the reply");
+    return PS_STATUS_ERROR;
+  }
+
+  const size_t capWordsAvailable =
+    (header.size - capsOffset) / sizeof(uint32_t);
+  const size_t numCommon  = reply->num_common_caps;
+  const size_t numChannel = reply->num_channel_caps;
+
+  if (numCommon > capWordsAvailable ||
+      numChannel > capWordsAvailable - numCommon)
+  {
+    channel_internal_disconnectNL(channel);
+    PS_LOG_ERROR("SpiceLinkReply capabilities exceed the reply");
+    return PS_STATUS_ERROR;
+  }
 
   if (channel->setCaps)
+  {
+    const size_t capWords = numCommon + numChannel;
+    uint32_t * caps = NULL;
+    if (capWords)
+    {
+      caps = alloca(capWords * sizeof(*caps));
+      memcpy(caps, (const uint8_t *)reply + capsOffset,
+          capWords * sizeof(*caps));
+    }
+
     channel->setCaps(
-      capsCommon , reply->num_common_caps,
-      capsChannel, reply->num_channel_caps);
+      caps                           , (int)numCommon,
+      caps ? caps + numCommon : NULL, (int)numChannel);
+  }
 
   SpiceLinkAuthMechanism auth;
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
