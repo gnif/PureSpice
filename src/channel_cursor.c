@@ -36,7 +36,7 @@ const SpiceLinkHeader * channelCursor_getConnectPacket(void)
     SpiceLinkHeader header;
     SpiceLinkMess   message;
     uint32_t        supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
-    uint32_t        channelCaps[RECORD_CAPS_BYTES / sizeof(uint32_t)];
+    uint32_t        channelCaps[CURSOR_CAPS_BYTES / sizeof(uint32_t)];
   }
   __attribute__((packed)) ConnectPacket;
 
