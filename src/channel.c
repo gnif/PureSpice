@@ -280,6 +280,30 @@ void channel_disconnect(PSChannel * channel)
   channel->doDisconnect = true;
 }
 
+bool channel_validatePayload(const PSChannel * channel, size_t minimum,
+    const char * message)
+{
+  if (channel->header.size >= minimum)
+    return true;
+
+  PS_LOG_ERROR("%s: %s payload is too small (%u bytes, expected at least %zu)",
+      channel->name, message, channel->header.size, minimum);
+  return false;
+}
+
+bool channel_validateRange(const PSChannel * channel, size_t offset,
+    size_t length, const char * field)
+{
+  if (offset <= channel->header.size &&
+      length <= channel->header.size - offset)
+    return true;
+
+  PS_LOG_ERROR("%s: %s range is outside the message "
+      "(offset: %zu, length: %zu, payload: %u)",
+      channel->name, field, offset, length, channel->header.size);
+  return false;
+}
+
 static PS_STATUS onMessage_setAck(PSChannel * channel)
 {
   SpiceMsgSetAck * msg = (SpiceMsgSetAck *)channel->buffer;

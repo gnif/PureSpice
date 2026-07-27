@@ -30,6 +30,12 @@ PSHandlerFn channel_onMessage(PSChannel * channel);
 
 bool channel_ack(PSChannel * channel);
 
+bool channel_validatePayload(const PSChannel * channel, size_t minimum,
+    const char * message);
+
+bool channel_validateRange(const PSChannel * channel, size_t offset,
+    size_t length, const char * field);
+
 ssize_t channel_writeNL(const PSChannel * channel,
     const void * buffer, size_t size);
 
