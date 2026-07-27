@@ -143,6 +143,15 @@ PS_STATUS agent_process(PSChannel * channel)
 {
   if (agent.cbRemain)
   {
+    if (channel->header.size > agent.cbRemain)
+    {
+      PS_LOG_ERROR(
+          "Agent clipboard continuation exceeds remaining transfer size "
+          "(fragment: %u, remaining: %u)",
+          channel->header.size, agent.cbRemain);
+      return PS_STATUS_ERROR;
+    }
+
     memcpy(agent.cbBuffer + agent.cbSize, channel->buffer, channel->header.size);
     agent.cbRemain -= channel->header.size;
     agent.cbSize   += channel->header.size;
@@ -198,6 +207,12 @@ PS_STATUS agent_process(PSChannel * channel)
       // all clipboard messages might have this
       if (agent.cbSelection)
       {
+        if (dataSize < sizeof(struct Selection))
+        {
+          PS_LOG_ERROR("Agent clipboard message is missing its selection");
+          return PS_STATUS_ERROR;
+        }
+
         struct Selection * selection = (struct Selection *)data;
         data     += sizeof(*selection);
         dataSize -= sizeof(*selection);
@@ -213,6 +228,12 @@ PS_STATUS agent_process(PSChannel * channel)
 
         case VD_AGENT_CLIPBOARD:
         {
+          if (dataSize < sizeof(uint32_t))
+          {
+            PS_LOG_ERROR("Agent clipboard message is missing its data type");
+            return PS_STATUS_ERROR;
+          }
+
           uint32_t * type = (uint32_t *)data;
           data     += sizeof(*type);
           dataSize -= sizeof(*type);
@@ -224,7 +245,25 @@ PS_STATUS agent_process(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          const unsigned int totalData = msg->size - sizeof(*type);
+          const unsigned int prefixSize =
+            sizeof(*type) +
+            (agent.cbSelection ? sizeof(struct Selection) : 0);
+          if (msg->size < prefixSize)
+          {
+            PS_LOG_ERROR("Agent clipboard message size is smaller than its header");
+            return PS_STATUS_ERROR;
+          }
+
+          const unsigned int totalData = msg->size - prefixSize;
+          if (dataSize > totalData)
+          {
+            PS_LOG_ERROR(
+                "Agent clipboard fragment exceeds declared transfer size "
+                "(fragment: %u, transfer: %u)",
+                dataSize, totalData);
+            return PS_STATUS_ERROR;
+          }
+
           agent.cbBuffer = (uint8_t *)malloc(totalData);
           if (!agent.cbBuffer)
           {
