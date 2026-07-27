@@ -225,6 +225,11 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
         return false;
       }
     }
+    else
+    {
+      PS_LOG_ERROR("asn1 parameters invalid");
+      return false;
+    }
   }
   else
   {
@@ -234,7 +239,15 @@ bool rsa_encryptPassword(uint8_t * pub_key, const char * password,
 
   mpz_t p;
   mpz_init(p);
-  oaep_pad(p, pub.size, (const uint8_t *)password, strlen(password)+1);
+  if (!oaep_pad(
+        p, pub.size, (const uint8_t *)password, strlen(password)+1))
+  {
+    rsa_public_key_clear(&pub);
+    mpz_clear(p);
+    PS_LOG_ERROR("Failed to apply RSA OAEP padding");
+    return false;
+  }
+
   mpz_powm(p, p, pub.e, pub.n);
 
   result->size = pub.size;
