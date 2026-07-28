@@ -81,9 +81,9 @@ static void playback_stop(void)
   printf("playback_stop\n");
 }
 
-static void playback_data(uint8_t * data, size_t size)
+static void playback_data(uint8_t * data, size_t size, uint32_t time)
 {
-  printf("playback_data(%p, %lu)\n", data, size);
+  printf("playback_data(%p, %lu, %u)\n", data, size, time);
 }
 
 static void genSine()

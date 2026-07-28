@@ -94,7 +94,10 @@ static PS_STATUS onMessage_playbackData(PSChannel * channel)
 
   SpiceMsgPlaybackPacket * msg = (SpiceMsgPlaybackPacket *)channel->buffer;
 
-  g_ps.config.playback.data(msg->data, channel->header.size - sizeof(*msg));
+  g_ps.config.playback.data(
+      msg->data, channel->header.size - sizeof(*msg),
+      msg->time);
+
   return PS_STATUS_OK;
 }
 

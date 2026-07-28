@@ -193,7 +193,7 @@ typedef struct PSConfig
     void (*stop)(void);
 
     /* called when there are audio samples */
-    void (*data)(uint8_t * data, size_t size);
+    void (*data)(uint8_t * data, size_t size, uint32_t time);
   }
   playback;
 
