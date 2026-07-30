@@ -155,7 +155,7 @@ SpicePattern;
 
 typedef struct SpiceBrush
 {
-  uint32_t type;
+  uint8_t type;
   union
   {
     uint32_t     color;
