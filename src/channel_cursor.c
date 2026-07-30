@@ -347,8 +347,7 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
 
 static PS_STATUS onMessage_cursorReset(PSChannel * channel)
 {
-  (void) channel;
-
+  channel->initDone = false;
   g_ps.cursor.visible = false;
   clearCursorState();
 
