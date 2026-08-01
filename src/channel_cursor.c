@@ -107,6 +107,168 @@ static size_t cursorBufferSize(SpiceCursorHeader * header)
   return 0;
 }
 
+static uint16_t readLE16(const uint8_t * data)
+{
+  return (uint16_t)data[0] | (uint16_t)data[1] << 8;
+}
+
+static uint32_t readLE32(const uint8_t * data)
+{
+  return (uint32_t)data[0]       | (uint32_t)data[1] << 8 |
+         (uint32_t)data[2] << 16 | (uint32_t)data[3] << 24;
+}
+
+static void writeRGBA(uint8_t * dst, uint32_t color, uint8_t alpha)
+{
+  dst[0] = color >> 16;
+  dst[1] = color >> 8;
+  dst[2] = color;
+  dst[3] = alpha;
+}
+
+static bool cursorMaskBit(const uint8_t * mask, unsigned stride,
+    unsigned x, unsigned y)
+{
+  return mask[y * stride + x / 8] & (0x80U >> (x % 8));
+}
+
+static uint8_t * convertCursorRGBA(
+    const struct PSCursorImage * cursor, const uint8_t ** andMask)
+{
+  const unsigned width      = cursor->header.width;
+  const unsigned height     = cursor->header.height;
+  const size_t pixelCount   = (size_t)width * height;
+  uint8_t * rgba = malloc(pixelCount * 4);
+  if (!rgba)
+  {
+    PS_LOG_ERROR("Failed to allocate converted cursor image");
+    return NULL;
+  }
+
+  *andMask = NULL;
+  if (cursor->header.type == SPICE_CURSOR_TYPE_ALPHA)
+  {
+    for (size_t i = 0; i < pixelCount; ++i)
+      writeRGBA(rgba + i * 4, readLE32(cursor->buffer + i * 4),
+          cursor->buffer[i * 4 + 3]);
+    return rgba;
+  }
+
+  const uint8_t * pixels = cursor->buffer;
+  const uint8_t * palette = NULL;
+  size_t pixelBytes;
+  switch (cursor->header.type)
+  {
+    case SPICE_CURSOR_TYPE_COLOR4:
+      pixelBytes = (size_t)((width + 1) / 2) * height;
+      palette = pixels + pixelBytes;
+      *andMask = palette + 16 * sizeof(uint32_t);
+      break;
+
+    case SPICE_CURSOR_TYPE_COLOR8:
+      pixelBytes = (size_t)width * height;
+      palette = pixels + pixelBytes;
+      *andMask = palette + 256 * sizeof(uint32_t);
+      break;
+
+    case SPICE_CURSOR_TYPE_COLOR16:
+      pixelBytes = pixelCount * 2;
+      *andMask = pixels + pixelBytes;
+      break;
+
+    case SPICE_CURSOR_TYPE_COLOR24:
+      pixelBytes = pixelCount * 3;
+      *andMask = pixels + pixelBytes;
+      break;
+
+    case SPICE_CURSOR_TYPE_COLOR32:
+      pixelBytes = pixelCount * 4;
+      *andMask = pixels + pixelBytes;
+      break;
+
+    default:
+      free(rgba);
+      return NULL;
+  }
+
+  for (unsigned y = 0; y < height; ++y)
+  {
+    for (unsigned x = 0; x < width; ++x)
+    {
+      const size_t i = (size_t)y * width + x;
+      uint32_t color;
+      switch (cursor->header.type)
+      {
+        case SPICE_CURSOR_TYPE_COLOR4:
+        {
+          const unsigned stride = (width + 1) / 2;
+          const uint8_t packed = pixels[y * stride + x / 2];
+          const unsigned index = x & 1 ? packed & 0x0f : packed >> 4;
+          color = readLE32(palette + index * sizeof(uint32_t));
+          break;
+        }
+
+        case SPICE_CURSOR_TYPE_COLOR8:
+          color = readLE32(palette + pixels[i] * sizeof(uint32_t));
+          break;
+
+        case SPICE_CURSOR_TYPE_COLOR16:
+        {
+          const uint16_t pixel = readLE16(pixels + i * 2);
+          const unsigned r = (pixel >> 10) & 0x1f;
+          const unsigned g = (pixel >> 5 ) & 0x1f;
+          const unsigned b =  pixel        & 0x1f;
+          color = ((r << 3 | r >> 2) << 16) |
+                  ((g << 3 | g >> 2) << 8 ) |
+                   (b << 3 | b >> 2);
+          break;
+        }
+
+        case SPICE_CURSOR_TYPE_COLOR24:
+          color = (uint32_t)pixels[i * 3 + 2] << 16 |
+                  (uint32_t)pixels[i * 3 + 1] << 8  |
+                            pixels[i * 3];
+          break;
+
+        case SPICE_CURSOR_TYPE_COLOR32:
+          color = readLE32(pixels + i * 4);
+          break;
+
+        default:
+          color = 0;
+      }
+
+      writeRGBA(rgba + i * 4, color, 255);
+    }
+  }
+
+  return rgba;
+}
+
+static void approximateColorCursor(uint8_t * rgba, const uint8_t * andMask,
+    unsigned width, unsigned height)
+{
+  const unsigned stride = (width + 7) / 8;
+  for (unsigned y = 0; y < height; ++y)
+  {
+    for (unsigned x = 0; x < width; ++x)
+    {
+      if (!cursorMaskBit(andMask, stride, x, y))
+        continue;
+
+      uint8_t * pixel = rgba + ((size_t)y * width + x) * 4;
+      if (pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0)
+        pixel[3] = 0;
+      else if (pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255)
+      {
+        const bool odd = (x ^ y) & 1;
+        pixel[0] = pixel[1] = pixel[2] = odd ? 0x24 : 0x0f;
+        pixel[3] = odd ? 0xc0 : 0x30;
+      }
+    }
+  }
+}
+
 static struct PSCursorImage * loadCursor(uint64_t id)
 {
   for (struct PSCursorImage * node = g_ps.cursor.cache; node; node = node->next)
@@ -150,6 +312,11 @@ static struct PSCursorImage * convertCursor(
         cursor->header.width, cursor->header.height);
     return NULL;
   }
+
+  if (cursor->header.hot_spot_x > cursor->header.width)
+    cursor->header.hot_spot_x = cursor->header.width;
+  if (cursor->header.hot_spot_y > cursor->header.height)
+    cursor->header.hot_spot_y = cursor->header.height;
 
   size_t bufferSize = cursorBufferSize(&cursor->header);
   if (!bufferSize)
@@ -264,14 +431,45 @@ static void updateCursorImage(void)
   switch (g_ps.cursor.current->header.type)
   {
     case SPICE_CURSOR_TYPE_ALPHA:
-      g_ps.config.cursor.setRGBAImage(
-        g_ps.cursor.current->header.width,
-        g_ps.cursor.current->header.height,
-        g_ps.cursor.current->header.hot_spot_x,
-        g_ps.cursor.current->header.hot_spot_y,
-        g_ps.cursor.current->buffer
-      );
+    case SPICE_CURSOR_TYPE_COLOR4:
+    case SPICE_CURSOR_TYPE_COLOR8:
+    case SPICE_CURSOR_TYPE_COLOR16:
+    case SPICE_CURSOR_TYPE_COLOR24:
+    case SPICE_CURSOR_TYPE_COLOR32:
+    {
+      const uint8_t * andMask;
+      uint8_t * rgba = convertCursorRGBA(g_ps.cursor.current, &andMask);
+      if (!rgba)
+        return;
+
+      if (andMask && g_ps.config.cursor.setColorImage)
+        g_ps.config.cursor.setColorImage(
+          g_ps.cursor.current->header.width,
+          g_ps.cursor.current->header.height,
+          g_ps.cursor.current->header.hot_spot_x,
+          g_ps.cursor.current->header.hot_spot_y,
+          rgba,
+          andMask
+        );
+      else
+      {
+        if (andMask)
+          approximateColorCursor(rgba, andMask,
+              g_ps.cursor.current->header.width,
+              g_ps.cursor.current->header.height);
+
+        g_ps.config.cursor.setRGBAImage(
+          g_ps.cursor.current->header.width,
+          g_ps.cursor.current->header.height,
+          g_ps.cursor.current->header.hot_spot_x,
+          g_ps.cursor.current->header.hot_spot_y,
+          rgba
+        );
+      }
+
+      free(rgba);
       break;
+    }
 
     case SPICE_CURSOR_TYPE_MONO:
     {
@@ -279,8 +477,8 @@ static void updateCursorImage(void)
       const unsigned height = g_ps.cursor.current->header.height;
       const unsigned size   = (width + 7) / 8 * height;
 
-      const uint8_t * xorBuffer = g_ps.cursor.current->buffer;
-      const uint8_t * andBuffer = xorBuffer + size;
+      const uint8_t * andBuffer = g_ps.cursor.current->buffer;
+      const uint8_t * xorBuffer = andBuffer + size;
 
       g_ps.config.cursor.setMonoImage(
         g_ps.cursor.current->header.width,
@@ -325,6 +523,7 @@ static PS_STATUS onMessage_cursorInit(PSChannel * channel)
       &msg->cursor, channel->header.size - cursorOffset, &valid);
   if (!valid)
     return PS_STATUS_ERROR;
+  channel->initDone = true;
 
   g_ps.cursor.x         = msg->position.x;
   g_ps.cursor.y         = msg->position.y;
@@ -349,7 +548,11 @@ static PS_STATUS onMessage_cursorReset(PSChannel * channel)
 {
   channel->initDone = false;
   g_ps.cursor.visible = false;
+  g_ps.cursor.trailLen = 0;
+  g_ps.cursor.trailFreq = 0;
   clearCursorState();
+  updateCursorStatus();
+  updateCursorTrail();
 
   return PS_STATUS_OK;
 }
@@ -381,8 +584,8 @@ static PS_STATUS onMessage_cursorSet(PSChannel * channel)
   if (!g_ps.cursor.current)
     g_ps.cursor.visible = false;
 
-  updateCursorStatus();
   updateCursorImage();
+  updateCursorStatus();
 
   return PS_STATUS_OK;
 }
@@ -397,6 +600,7 @@ static PS_STATUS onMessage_cursorMove(PSChannel * channel)
 
   g_ps.cursor.x = msg->position.x;
   g_ps.cursor.y = msg->position.y;
+  g_ps.cursor.visible = g_ps.cursor.current != NULL;
   updateCursorStatus();
 
   return PS_STATUS_OK;
@@ -474,28 +678,29 @@ static PS_STATUS onMessage_cursorInvalAll(PSChannel * channel)
 
 PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 {
-  if (!channel->initDone)
-  {
-    if (channel->header.type == SPICE_MSG_CURSOR_INIT)
-    {
-      channel->initDone = true;
-      return onMessage_cursorInit;
-    }
-
-    PS_LOG_ERROR("Expected SPICE_MSG_CURSOR_INIT but got %u",
-        channel->header.type);
-    return PS_HANDLER_ERROR;
-  }
-
   switch(channel->header.type)
   {
     case SPICE_MSG_CURSOR_INIT:
-      PS_LOG_ERROR("Unexpected SPICE_MSG_CURSOR_INIT");
-      return PS_HANDLER_ERROR;
+      if (channel->initDone)
+        PS_LOG_WARN("Received SPICE_MSG_CURSOR_INIT without a preceding reset");
+      return onMessage_cursorInit;
 
     case SPICE_MSG_CURSOR_RESET:
       return onMessage_cursorReset;
 
+    case SPICE_MSG_CURSOR_INVAL_ALL:
+      return onMessage_cursorInvalAll;
+  }
+
+  if (!channel->initDone)
+  {
+    PS_LOG_WARN("Ignoring cursor message %u while waiting for "
+        "SPICE_MSG_CURSOR_INIT", channel->header.type);
+    return PS_HANDLER_DISCARD;
+  }
+
+  switch(channel->header.type)
+  {
     case SPICE_MSG_CURSOR_SET:
       return onMessage_cursorSet;
 
@@ -510,9 +715,6 @@ PSHandlerFn channelCursor_onMessage(PSChannel * channel)
 
     case SPICE_MSG_CURSOR_INVAL_ONE:
       return onMessage_cursorInvalOne;
-
-    case SPICE_MSG_CURSOR_INVAL_ALL:
-      return onMessage_cursorInvalAll;
   }
 
   return PS_HANDLER_DISCARD;

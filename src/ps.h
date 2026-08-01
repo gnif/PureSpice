@@ -229,7 +229,7 @@ struct PS
 
   struct
   {
-    uint16_t                x, y;
+    int16_t                 x, y;
     uint16_t                trailLen, trailFreq;
     bool                    visible;
     struct PSCursorImage  * cache;

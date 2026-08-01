@@ -259,8 +259,8 @@ typedef struct PSConfig
     /* automatically connect to the channel as soon as it's available */
     bool autoConnect;
 
-    /* called to indicate the cursor image has changed to an RGBA bitmap
-     * with hotspot at (hx, hy) */
+    /* called to indicate the cursor image has changed to a premultiplied RGBA
+     * bitmap with hotspot at (hx, hy) */
     void (*setRGBAImage)(int width, int height, int hx, int hy,
       const void * data);
 
@@ -274,6 +274,15 @@ typedef struct PSConfig
 
     /* called to indicate that the mouse trail is set as follows (optional) */
     void (*setTrail)(int length, int frequency);
+
+    /* called for legacy color cursors that combine an RGB XOR bitmap with a
+     * 1-bit AND mask: result = (destination & andMask) ^ rgba. rgba contains
+     * width * height RGBA pixels and andMask contains MSB-first rows with a
+     * stride of (width + 7) / 8. The alpha channel in rgba is always 255.
+     * Optional; setRGBAImage receives a best-effort composited fallback when
+     * this callback is not provided. */
+    void (*setColorImage)(int width, int height, int hx, int hy,
+      const void * rgba, const void * andMask);
   }
   cursor;
 }
