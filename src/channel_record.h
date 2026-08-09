@@ -20,6 +20,6 @@
 
 #include "ps.h"
 
-const SpiceLinkHeader * channelRecord_getConnectPacket(void);
+void channelRecord_setClientCaps(uint32_t * caps);
 
 PSHandlerFn channelRecord_onMessage(PSChannel * channel);

@@ -20,7 +20,7 @@
 
 #include "ps.h"
 
-const SpiceLinkHeader * channelMain_getConnectPacket(void);
+void channelMain_setClientCaps(uint32_t * caps);
 void channelMain_setCaps(const uint32_t * common, int numCommon,
     const uint32_t * channel, int numChannel);
 PSHandlerFn channelMain_onMessage(struct PSChannel * channel);

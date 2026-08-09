@@ -44,6 +44,10 @@
  * unbounded allocation. */
 #define SPICE_MAX_MESSAGE_SIZE (256U * 1024U * 1024U)
 
+/* Reserve stable storage for every possible ID of one multi-instance channel
+ * type in addition to the existing singleton channels. */
+#define PS_CHANNEL_CAPACITY (PS_CHANNEL_MAX + UINT8_MAX + 1)
+
 static inline void * spice_initPacket(void * packet, uint16_t type,
     size_t dataSize, size_t extraData)
 {
@@ -142,6 +146,7 @@ typedef PS_STATUS (*PSHandlerFn)(PSChannel * channel);
 struct PSChannel
 {
   uint8_t      spiceType;
+  uint8_t      id;
   const char * name;
   atomic_bool  available;
   bool       * enable;
@@ -156,7 +161,8 @@ struct PSChannel
   bool         discarding;
   unsigned int discardSize;
 
-  const SpiceLinkHeader * (*getConnectPacket)(void);
+  unsigned int clientCapsBytes;
+  void (*setClientCaps)(uint32_t * caps);
   void (*setCaps)(
       const uint32_t * common , int numCommon,
       const uint32_t * channel, int numChannel);
@@ -202,13 +208,13 @@ struct PS
   addr;
 
   uint32_t sessionID;
-  uint32_t channelID;
   char   * guestName;
   uint8_t  guestUUID[16];
 
   atomic_bool connected;
   int    epollfd;
-  PSChannel channels[PS_CHANNEL_MAX];
+  unsigned int channelCount;
+  PSChannel channels[PS_CHANNEL_CAPACITY];
   bool   channelsReady;
 
   struct
@@ -245,6 +251,12 @@ struct PS
 extern PS g_ps;
 
 PS_STATUS ps_connectChannel(PSChannel * ch);
+PS_STATUS ps_bindChannel(PSChannel * ch, uint8_t id);
+void ps_unpublishChannel(PSChannel * ch);
+
+/* Process-thread only. Configure the returned channel before yielding back to
+ * the dispatcher. */
+PSChannel * ps_allocChannel(void);
 
 PS_STATUS purespice_onCommonRead(PSChannel * channel,
     SpiceMiniDataHeader * header, int * dataAvailable);

@@ -20,6 +20,4 @@
 
 #include "ps.h"
 
-const SpiceLinkHeader * channelInputs_getConnectPacket(void);
-
 PSHandlerFn channelInputs_onMessage(PSChannel * channel);

@@ -56,57 +56,61 @@ PS g_ps =
   {
     // PS_CHANNEL_MAIN
     {
-      .spiceType        = SPICE_CHANNEL_MAIN,
-      .name             = "MAIN",
-      .getConnectPacket = channelMain_getConnectPacket,
-      .setCaps          = channelMain_setCaps,
-      .onMessage        = channelMain_onMessage
+      .spiceType       = SPICE_CHANNEL_MAIN,
+      .name            = "MAIN",
+      .clientCapsBytes = MAIN_CAPS_BYTES,
+      .setClientCaps   = channelMain_setClientCaps,
+      .setCaps         = channelMain_setCaps,
+      .onMessage       = channelMain_onMessage
     },
     // PS_CHANNEL_INPUTS
     {
-      .spiceType        = SPICE_CHANNEL_INPUTS,
-      .name             = "INPUTS",
-      .enable           = &g_ps.config.inputs.enable,
-      .autoConnect      = &g_ps.config.inputs.autoConnect,
-      .getConnectPacket = channelInputs_getConnectPacket,
-      .onMessage        = channelInputs_onMessage
+      .spiceType       = SPICE_CHANNEL_INPUTS,
+      .name            = "INPUTS",
+      .enable          = &g_ps.config.inputs.enable,
+      .autoConnect     = &g_ps.config.inputs.autoConnect,
+      .clientCapsBytes = INPUT_CAPS_BYTES,
+      .onMessage       = channelInputs_onMessage
     },
     // PS_CHANNEL_PLAYBACK
     {
-      .spiceType        = SPICE_CHANNEL_PLAYBACK,
-      .name             = "PLAYBACK",
-      .enable           = &g_ps.config.playback.enable,
-      .autoConnect      = &g_ps.config.playback.autoConnect,
-      .getConnectPacket = channelPlayback_getConnectPacket,
-      .onMessage        = channelPlayback_onMessage
+      .spiceType       = SPICE_CHANNEL_PLAYBACK,
+      .name            = "PLAYBACK",
+      .enable          = &g_ps.config.playback.enable,
+      .autoConnect     = &g_ps.config.playback.autoConnect,
+      .clientCapsBytes = PLAYBACK_CAPS_BYTES,
+      .setClientCaps   = channelPlayback_setClientCaps,
+      .onMessage       = channelPlayback_onMessage
     },
     // PS_CHANNEL_RECORD
     {
-      .spiceType        = SPICE_CHANNEL_RECORD,
-      .name             = "RECORD",
-      .enable           = &g_ps.config.record.enable,
-      .autoConnect      = &g_ps.config.record.autoConnect,
-      .getConnectPacket = channelRecord_getConnectPacket,
-      .onMessage        = channelRecord_onMessage,
+      .spiceType       = SPICE_CHANNEL_RECORD,
+      .name            = "RECORD",
+      .enable          = &g_ps.config.record.enable,
+      .autoConnect     = &g_ps.config.record.autoConnect,
+      .clientCapsBytes = RECORD_CAPS_BYTES,
+      .setClientCaps   = channelRecord_setClientCaps,
+      .onMessage       = channelRecord_onMessage,
     },
     // PS_CHANNEL_DISPLAY
     {
-      .spiceType        = SPICE_CHANNEL_DISPLAY,
-      .name             = "DISPLAY",
-      .enable           = &g_ps.config.display.enable,
-      .autoConnect      = &g_ps.config.display.autoConnect,
-      .getConnectPacket = channelDisplay_getConnectPacket,
-      .onConnect        = channelDisplay_onConnect,
-      .onMessage        = channelDisplay_onMessage
+      .spiceType       = SPICE_CHANNEL_DISPLAY,
+      .name            = "DISPLAY",
+      .enable          = &g_ps.config.display.enable,
+      .autoConnect     = &g_ps.config.display.autoConnect,
+      .clientCapsBytes = DISPLAY_CAPS_BYTES,
+      .setClientCaps   = channelDisplay_setClientCaps,
+      .onConnect       = channelDisplay_onConnect,
+      .onMessage       = channelDisplay_onMessage
     },
     // PS_CHANNEL_CURSOR
     {
-      .spiceType        = SPICE_CHANNEL_CURSOR,
-      .name             = "CURSOR",
-      .enable           = &g_ps.config.cursor.enable,
-      .autoConnect      = &g_ps.config.cursor.autoConnect,
-      .getConnectPacket = channelCursor_getConnectPacket,
-      .onMessage        = channelCursor_onMessage
+      .spiceType       = SPICE_CHANNEL_CURSOR,
+      .name            = "CURSOR",
+      .enable          = &g_ps.config.cursor.enable,
+      .autoConnect     = &g_ps.config.cursor.autoConnect,
+      .clientCapsBytes = CURSOR_CAPS_BYTES,
+      .onMessage       = channelCursor_onMessage
     }
   }
 };
@@ -117,6 +121,7 @@ void purespice_init(const PSInit * init)
     memcpy(&g_ps.init, init, sizeof(*init));
 
   g_ps.epollfd = -1;
+  g_ps.channelCount = PS_CHANNEL_MAX;
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
   {
     g_ps.channels[i].socket = -1;
@@ -268,7 +273,13 @@ bool purespice_connect(const PSConfig * config)
     goto err_config;
   }
 
-  g_ps.channelID = 0;
+  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+  {
+    g_ps.channels[i].id = 0;
+    atomic_store_explicit(&g_ps.channels[i].available,
+        false, memory_order_release);
+  }
+
   if (channel_connect(&g_ps.channels[0]) != PS_STATUS_OK)
   {
     PS_LOG_ERROR("channel connect failed");
@@ -297,14 +308,20 @@ err_host:
 
 static void purespice_disconnectNow(bool wasConnected)
 {
-  for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+  for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
+  {
     channel_internal_disconnect(&g_ps.channels[i]);
+    atomic_store_explicit(&g_ps.channels[i].available,
+        false, memory_order_release);
+  }
 
   if (g_ps.epollfd >= 0)
   {
     close(g_ps.epollfd);
     g_ps.epollfd = -1;
   }
+
+  g_ps.channelCount = PS_CHANNEL_MAX;
 
   if (g_ps.motionBuffer)
   {
@@ -367,14 +384,14 @@ void purespice_disconnect(void)
 
 static PSStatus purespice_processInternal(int timeout)
 {
-  static struct epoll_event events[PS_CHANNEL_MAX];
+  static struct epoll_event events[PS_CHANNEL_CAPACITY];
 
   // check for pending disconnects
-  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+  for(unsigned int i = 0; i < g_ps.channelCount; ++i)
     if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
       channel_disconnectPending(&g_ps.channels[i]);
 
-  int nfds = epoll_wait(g_ps.epollfd, events, PS_CHANNEL_MAX, timeout);
+  int nfds = epoll_wait(g_ps.epollfd, events, g_ps.channelCount, timeout);
   if (atomic_load(&g_ps.disconnectPending))
     return PS_STATUS_SHUTDOWN;
 
@@ -590,19 +607,20 @@ done_disconnect:
     }
   }
 
-  for(int i = 0; i < PS_CHANNEL_MAX; ++i)
+  for(unsigned int i = 0; i < g_ps.channelCount; ++i)
     if (g_ps.channels[i].connected)
       return PS_STATUS_RUN;
 
   g_ps.sessionID = 0;
 
-  for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
+  for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
     if (g_ps.channels[i].socket >= 0)
     {
       close(g_ps.channels[i].socket);
       g_ps.channels[i].socket = -1;
     }
 
+  g_ps.channelCount = PS_CHANNEL_MAX;
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
 }
@@ -711,7 +729,7 @@ bool purespice_hasChannel(PSChannelType channel)
   if (!ch)
     return false;
 
-  return ch->available;
+  return atomic_load_explicit(&ch->available, memory_order_acquire);
 }
 
 bool purespice_channelConnected(PSChannelType channel)
@@ -722,7 +740,7 @@ bool purespice_channelConnected(PSChannelType channel)
   return ch->connected;
 }
 
-PS_STATUS ps_connectChannel(PSChannel * ch)
+static void lockChannelConnection(PSChannel * ch)
 {
   bool expected = false;
   while (!atomic_compare_exchange_weak_explicit(&ch->connecting,
@@ -732,19 +750,24 @@ PS_STATUS ps_connectChannel(PSChannel * ch)
       sched_yield();
     expected = false;
   }
+}
+
+static void unlockChannelConnection(PSChannel * ch)
+{
+  atomic_store_explicit(&ch->connecting, false, memory_order_release);
+}
+
+static PS_STATUS connectChannel(PSChannel * ch)
+{
+  PS_STATUS status;
 
   if (channel_cancelDisconnect(ch))
-  {
-    atomic_store_explicit(&ch->connecting, false, memory_order_release);
     return PS_STATUS_OK;
-  }
 
-  PS_STATUS status;
   if ((status = channel_connect(ch)) != PS_STATUS_OK)
   {
     purespice_disconnect();
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-    atomic_store_explicit(&ch->connecting, false, memory_order_release);
     return status;
   }
 
@@ -753,12 +776,92 @@ PS_STATUS ps_connectChannel(PSChannel * ch)
   {
     purespice_disconnect();
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-    atomic_store_explicit(&ch->connecting, false, memory_order_release);
     return status;
   }
 
-  atomic_store_explicit(&ch->connecting, false, memory_order_release);
   return PS_STATUS_OK;
+}
+
+PS_STATUS ps_connectChannel(PSChannel * ch)
+{
+  lockChannelConnection(ch);
+
+  if (!atomic_load_explicit(&ch->available, memory_order_acquire))
+  {
+    PS_LOG_ERROR("%s: Channel is not availble", ch->name);
+    unlockChannelConnection(ch);
+    return PS_STATUS_ERROR;
+  }
+
+  const PS_STATUS status = connectChannel(ch);
+  unlockChannelConnection(ch);
+  return status;
+}
+
+PS_STATUS ps_bindChannel(PSChannel * ch, uint8_t id)
+{
+  lockChannelConnection(ch);
+
+  const bool wasAvailable =
+    atomic_load_explicit(&ch->available, memory_order_acquire);
+  const bool connected =
+    atomic_load_explicit(&ch->connected, memory_order_acquire);
+
+  if (connected && ch->id != id)
+  {
+    PS_LOG_ERROR("Protocol error. The server replaced the connected %s "
+        "channel (%u -> %u)", ch->name, ch->id, id);
+    unlockChannelConnection(ch);
+    return PS_STATUS_ERROR;
+  }
+
+  const bool newIdentity = !wasAvailable || ch->id != id;
+  if (!connected && newIdentity)
+  {
+    atomic_store_explicit(&ch->available, false, memory_order_release);
+    ch->id = id;
+  }
+
+  atomic_store_explicit(&ch->available, true, memory_order_release);
+
+  PS_STATUS status = PS_STATUS_OK;
+  if (newIdentity &&
+      (!ch->enable || *ch->enable) &&
+      (!ch->autoConnect || *ch->autoConnect) &&
+      !connected)
+    status = connectChannel(ch);
+
+  unlockChannelConnection(ch);
+  return status;
+}
+
+void ps_unpublishChannel(PSChannel * ch)
+{
+  lockChannelConnection(ch);
+  atomic_store_explicit(&ch->available, false, memory_order_release);
+  unlockChannelConnection(ch);
+}
+
+PSChannel * ps_allocChannel(void)
+{
+  if (g_ps.channelCount >= PS_CHANNEL_CAPACITY)
+  {
+    PS_LOG_ERROR("The channel instance limit has been reached");
+    return NULL;
+  }
+
+  PSChannel * ch = &g_ps.channels[g_ps.channelCount];
+  memset(ch, 0, sizeof(*ch));
+  atomic_init(&ch->available   , false);
+  atomic_init(&ch->connected   , false);
+  atomic_init(&ch->ready       , false);
+  atomic_init(&ch->doDisconnect, false);
+  atomic_init(&ch->initDone    , false);
+  atomic_init(&ch->connecting  , false);
+  atomic_init(&ch->socket      , -1);
+  SPICE_LOCK_INIT(ch->lock);
+  ++g_ps.channelCount;
+  return ch;
 }
 
 bool purespice_connectChannel(PSChannelType channel)
@@ -766,12 +869,6 @@ bool purespice_connectChannel(PSChannelType channel)
   PSChannel * ch = getChannel(channel);
   if (!ch)
     return false;
-
-  if (!ch->available)
-  {
-    PS_LOG_ERROR("%s: Channel is not availble", ch->name);
-    return false;
-  }
 
   return ps_connectChannel(ch) == PS_STATUS_OK;
 }
@@ -782,15 +879,17 @@ bool purespice_disconnectChannel(PSChannelType channel)
   if (!ch)
     return false;
 
-  if (!ch->available)
+  lockChannelConnection(ch);
+  if (!atomic_load_explicit(&ch->available, memory_order_acquire))
   {
     PS_LOG_ERROR("%s: Channel is not availble", ch->name);
+    unlockChannelConnection(ch);
     return false;
   }
 
-  if (!ch->connected)
-    return true;
+  if (atomic_load_explicit(&ch->connected, memory_order_acquire))
+    channel_disconnect(ch);
 
-  channel_disconnect(ch);
+  unlockChannelConnection(ch);
   return true;
 }

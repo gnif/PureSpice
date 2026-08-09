@@ -27,47 +27,10 @@
 
 #include "messages.h"
 
-const SpiceLinkHeader * channelRecord_getConnectPacket(void)
+void channelRecord_setClientCaps(uint32_t * caps)
 {
-  typedef struct
-  {
-    SpiceLinkHeader header;
-    SpiceLinkMess   message;
-    uint32_t        supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
-    uint32_t        channelCaps[RECORD_CAPS_BYTES / sizeof(uint32_t)];
-  }
-  __attribute__((packed)) ConnectPacket;
-
-  static ConnectPacket p =
-  {
-    .header = {
-      .magic         = SPICE_MAGIC        ,
-      .major_version = SPICE_VERSION_MAJOR,
-      .minor_version = SPICE_VERSION_MINOR,
-      .size          = sizeof(ConnectPacket) - sizeof(SpiceLinkHeader)
-    },
-    .message = {
-      .channel_type     = SPICE_CHANNEL_RECORD,
-      .num_common_caps  = COMMON_CAPS_BYTES / sizeof(uint32_t),
-      .num_channel_caps = RECORD_CAPS_BYTES / sizeof(uint32_t),
-      .caps_offset      = sizeof(SpiceLinkMess)
-    }
-  };
-
-  p.message.connection_id = g_ps.sessionID;
-  p.message.channel_id    = g_ps.channelID;
-
-  memset(p.supportCaps, 0, sizeof(p.supportCaps));
-  memset(p.channelCaps, 0, sizeof(p.channelCaps));
-
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
-
   if (g_ps.config.record.volume || g_ps.config.record.mute)
-    RECORD_SET_CAPABILITY(p.channelCaps, SPICE_RECORD_CAP_VOLUME);
-
-  return &p.header;
+    RECORD_SET_CAPABILITY(caps, SPICE_RECORD_CAP_VOLUME);
 }
 
 static PS_STATUS onMessage_recordStart(PSChannel * channel)

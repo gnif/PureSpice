@@ -47,6 +47,56 @@ static uint64_t get_timestamp(void)
 
 static void channel_internal_disconnectNL(PSChannel * channel);
 
+static bool channel_sendConnectPacketNL(PSChannel * channel)
+{
+  typedef struct
+  {
+    SpiceLinkHeader header;
+    SpiceLinkMess   message;
+    uint8_t         caps[];
+  }
+  __attribute__((packed)) ConnectPacket;
+
+  const size_t packetSize = sizeof(ConnectPacket) +
+    COMMON_CAPS_BYTES + channel->clientCapsBytes;
+  ConnectPacket * packet = alloca(packetSize);
+
+  memset(packet, 0, packetSize);
+  packet->header.magic         = SPICE_MAGIC;
+  packet->header.major_version = SPICE_VERSION_MAJOR;
+  packet->header.minor_version = SPICE_VERSION_MINOR;
+  packet->header.size          = packetSize - sizeof(packet->header);
+
+  packet->message.connection_id    = g_ps.sessionID;
+  packet->message.channel_type     = channel->spiceType;
+  packet->message.channel_id       = channel->id;
+  packet->message.num_common_caps  =
+    COMMON_CAPS_BYTES / sizeof(uint32_t);
+  packet->message.num_channel_caps =
+    channel->clientCapsBytes / sizeof(uint32_t);
+  packet->message.caps_offset      = sizeof(packet->message);
+
+  uint32_t commonCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)] = { 0 };
+  COMMON_SET_CAPABILITY(commonCaps,
+      SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
+  COMMON_SET_CAPABILITY(commonCaps, SPICE_COMMON_CAP_AUTH_SPICE);
+  COMMON_SET_CAPABILITY(commonCaps, SPICE_COMMON_CAP_MINI_HEADER);
+  memcpy(packet->caps, commonCaps, sizeof(commonCaps));
+
+  if (channel->clientCapsBytes)
+  {
+    uint32_t * channelCaps = alloca(channel->clientCapsBytes);
+    memset(channelCaps, 0, channel->clientCapsBytes);
+    if (channel->setClientCaps)
+      channel->setClientCaps(channelCaps);
+
+    memcpy(packet->caps + sizeof(commonCaps),
+        channelCaps, channel->clientCapsBytes);
+  }
+
+  return (size_t)channel_writeNL(channel, packet, packetSize) == packetSize;
+}
+
 static PS_STATUS channel_connectNL(PSChannel * channel)
 {
   PS_STATUS status;
@@ -103,8 +153,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
 
   channel->connected = true;
 
-  const SpiceLinkHeader * p = channel->getConnectPacket();
-  if ((size_t)channel_writeNL(channel, p, p->size + sizeof(*p)) != p->size + sizeof(*p))
+  if (!channel_sendConnectPacketNL(channel))
   {
     channel_internal_disconnectNL(channel);
     PS_LOG_ERROR("Failed to write the connect packet");

@@ -39,49 +39,12 @@ struct ChannelMain
 
 static struct ChannelMain cm = { 0 };
 
-const SpiceLinkHeader * channelMain_getConnectPacket(void)
+void channelMain_setClientCaps(uint32_t * caps)
 {
-  typedef struct
-  {
-    SpiceLinkHeader header;
-    SpiceLinkMess   message;
-    uint32_t        supportCaps[COMMON_CAPS_BYTES / sizeof(uint32_t)];
-    uint32_t        channelCaps[MAIN_CAPS_BYTES   / sizeof(uint32_t)];
-  }
-  __attribute__((packed)) ConnectPacket;
-
-  static ConnectPacket p =
-  {
-    .header = {
-      .magic         = SPICE_MAGIC        ,
-      .major_version = SPICE_VERSION_MAJOR,
-      .minor_version = SPICE_VERSION_MINOR,
-      .size          = sizeof(ConnectPacket) - sizeof(SpiceLinkHeader)
-    },
-    .message = {
-      .channel_type     = SPICE_CHANNEL_MAIN,
-      .num_common_caps  = COMMON_CAPS_BYTES / sizeof(uint32_t),
-      .num_channel_caps = MAIN_CAPS_BYTES   / sizeof(uint32_t),
-      .caps_offset      = sizeof(SpiceLinkMess)
-    }
-  };
-
-  p.message.connection_id = g_ps.sessionID;
-  p.message.channel_id    = g_ps.channelID;
-
-  memset(p.supportCaps, 0, sizeof(p.supportCaps));
-  memset(p.channelCaps, 0, sizeof(p.channelCaps));
-
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_PROTOCOL_AUTH_SELECTION);
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_AUTH_SPICE             );
-  COMMON_SET_CAPABILITY(p.supportCaps, SPICE_COMMON_CAP_MINI_HEADER            );
-
-  MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
-  MAIN_SET_CAPABILITY(p.channelCaps, SPICE_MAIN_CAP_NAME_AND_UUID         );
+  MAIN_SET_CAPABILITY(caps, SPICE_MAIN_CAP_AGENT_CONNECTED_TOKENS);
+  MAIN_SET_CAPABILITY(caps, SPICE_MAIN_CAP_NAME_AND_UUID);
 
   memset(&cm, 0, sizeof(cm));
-
-  return &p.header;
 }
 
 void channelMain_setCaps(const uint32_t * common, int numCommon,
@@ -231,41 +194,44 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
-  for(int n = 0; n < PS_CHANNEL_MAX; ++n)
+  for(int n = 1; n < PS_CHANNEL_MAX; ++n)
   {
     struct PSChannel * ch = &g_ps.channels[n];
-    ch->available = false;
-  }
+    SpiceChannelID * match = NULL;
+    const bool bound =
+      atomic_load_explicit(&ch->available, memory_order_acquire) ||
+      atomic_load_explicit(&ch->connected, memory_order_acquire);
 
-  for(size_t i = 0; i < msg->num_of_channels; ++i)
-    for(int n = 0; n < PS_CHANNEL_MAX; ++n)
+    for(size_t i = 0; i < msg->num_of_channels; ++i)
     {
-      struct PSChannel * ch = &g_ps.channels[n];
-      if (ch->spiceType != msg->channels[i].type)
-       continue;
-
-      ch->available = true;
-      if ((ch->enable && !*ch->enable) || (ch->autoConnect && !*ch->autoConnect))
+      SpiceChannelID * candidate = &msg->channels[i];
+      if (ch->spiceType != candidate->type)
         continue;
 
-      if (ch->connected)
-      {
-        purespice_disconnect();
-        PS_LOG_ERROR("Protocol error. The server asked us to reconnect an "
-            "already connected channel (%s)", ch->name);
-        return PS_STATUS_ERROR;
-      }
+      if (!match)
+        match = candidate;
 
-      PS_STATUS status = ps_connectChannel(ch);
-      if (status != PS_STATUS_OK)
+      if (bound && ch->id == candidate->channel_id)
       {
-        purespice_disconnect();
-        PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
-        return status;
+        match = candidate;
+        break;
       }
-
-      break;
     }
+
+    if (!match)
+    {
+      ps_unpublishChannel(ch);
+      continue;
+    }
+
+    PS_STATUS status = ps_bindChannel(ch, match->channel_id);
+    if (status != PS_STATUS_OK)
+    {
+      purespice_disconnect();
+      PS_LOG_ERROR("Failed to bind the %s channel", ch->name);
+      return status;
+    }
+  }
 
   cm.hasList = true;
   checkReady();
