@@ -21,6 +21,7 @@
 #include "log.h"
 #include "channel_main.h"
 #include "channel.h"
+#include "channel_usbredir.h"
 #include "agent.h"
 #include "messages.h"
 
@@ -232,6 +233,18 @@ static PS_STATUS onMessage_mainChannelsList(struct PSChannel * channel)
       return status;
     }
   }
+
+  const PS_STATUS usbRedirStatus =
+    channelUSBRedir_reconcile(msg->channels, msg->num_of_channels);
+  if (usbRedirStatus != PS_STATUS_OK)
+  {
+    purespice_disconnect();
+    PS_LOG_ERROR("Failed to reconcile USB redirection channels");
+    return usbRedirStatus;
+  }
+
+  if (atomic_load_explicit(&g_ps.disconnectPending, memory_order_acquire))
+    return PS_STATUS_OK;
 
   cm.hasList = true;
   checkReady();

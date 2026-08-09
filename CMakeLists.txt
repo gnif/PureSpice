@@ -37,6 +37,7 @@ add_library(purespice STATIC
 	src/channel_record.c
 	src/channel_display.c
 	src/channel_cursor.c
+	src/channel_usbredir.c
 	src/agent.c
 )
 

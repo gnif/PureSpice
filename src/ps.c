@@ -30,6 +30,7 @@
 #include "channel_record.h"
 #include "channel_display.h"
 #include "channel_cursor.h"
+#include "channel_usbredir.h"
 
 #include "messages.h"
 #include "rsa.h"
@@ -128,6 +129,7 @@ void purespice_init(const PSInit * init)
     SPICE_LOCK_INIT(g_ps.channels[i].lock);
   }
   SPICE_LOCK_INIT(g_ps.mouse.lock);
+  channelUSBRedir_init();
 
   log_init();
   g_ps.initialized = true;
@@ -138,6 +140,7 @@ bool purespice_connect(const PSConfig * config)
   if (!g_ps.initialized)
     purespice_init(NULL);
 
+  channelUSBRedir_sessionStart();
   memcpy(&g_ps.config, config, sizeof(*config));
 
   g_ps.config.host = (const char *)strdup(config->host);
@@ -213,6 +216,21 @@ bool purespice_connect(const PSConfig * config)
     if (!g_ps.config.record.stop)
     {
       PS_LOG_ERROR("record->stop is mandatory");
+      goto err_config;
+    }
+  }
+
+  if (g_ps.config.usbRedir.enable)
+  {
+    if (!g_ps.config.usbRedir.state)
+    {
+      PS_LOG_ERROR("usbRedir->state is mandatory");
+      goto err_config;
+    }
+
+    if (!g_ps.config.usbRedir.data)
+    {
+      PS_LOG_ERROR("usbRedir->data is mandatory");
       goto err_config;
     }
   }
@@ -308,6 +326,8 @@ err_host:
 
 static void purespice_disconnectNow(bool wasConnected)
 {
+  channelUSBRedir_shutdownBegin();
+
   for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
   {
     channel_internal_disconnect(&g_ps.channels[i]);
@@ -321,6 +341,7 @@ static void purespice_disconnectNow(bool wasConnected)
     g_ps.epollfd = -1;
   }
 
+  channelUSBRedir_shutdownEnd();
   g_ps.channelCount = PS_CHANNEL_MAX;
 
   if (g_ps.motionBuffer)
@@ -354,14 +375,18 @@ static void purespice_disconnectNow(bool wasConnected)
     PS_LOG_INFO("Disconnected");
 }
 
-static void purespice_finishPendingDisconnectLocked(void)
+static bool purespice_finishPendingDisconnectLocked(void)
 {
+  bool finished = false;
   while(atomic_exchange(&g_ps.disconnectPending, false))
   {
     const bool wasConnected =
       atomic_exchange(&g_ps.disconnectWasConnected, false);
     purespice_disconnectNow(wasConnected);
+    finished = true;
   }
+
+  return finished;
 }
 
 void purespice_disconnect(void)
@@ -377,9 +402,13 @@ void purespice_disconnect(void)
   if (atomic_exchange(&g_ps.connected, false))
     atomic_store(&g_ps.disconnectWasConnected, true);
   atomic_store(&g_ps.disconnectPending, true);
+  bool finished = false;
   if (!atomic_load(&g_ps.processing))
-    purespice_finishPendingDisconnectLocked();
+    finished = purespice_finishPendingDisconnectLocked();
   SPICE_UNLOCK(disconnectLock);
+
+  if (finished)
+    channelUSBRedir_finishShutdown();
 }
 
 static PSStatus purespice_processInternal(int timeout)
@@ -389,7 +418,11 @@ static PSStatus purespice_processInternal(int timeout)
   // check for pending disconnects
   for(unsigned int i = 0; i < g_ps.channelCount; ++i)
     if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
+    {
       channel_disconnectPending(&g_ps.channels[i]);
+      if (atomic_load_explicit(&g_ps.disconnectPending, memory_order_acquire))
+        return PS_STATUS_SHUTDOWN;
+    }
 
   int nfds = epoll_wait(g_ps.epollfd, events, g_ps.channelCount, timeout);
   if (atomic_load(&g_ps.disconnectPending))
@@ -604,6 +637,8 @@ done_disconnect:
       ++done;
       events[i].data.ptr = NULL;
       channel_internal_disconnect(channel);
+      if (atomic_load_explicit(&g_ps.disconnectPending, memory_order_acquire))
+        return PS_STATUS_SHUTDOWN;
     }
   }
 
@@ -613,6 +648,8 @@ done_disconnect:
 
   g_ps.sessionID = 0;
 
+  channelUSBRedir_shutdownBegin();
+
   for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
     if (g_ps.channels[i].socket >= 0)
     {
@@ -620,7 +657,9 @@ done_disconnect:
       g_ps.channels[i].socket = -1;
     }
 
+  channelUSBRedir_shutdownEnd();
   g_ps.channelCount = PS_CHANNEL_MAX;
+  channelUSBRedir_finishShutdown();
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
 }
@@ -631,8 +670,10 @@ PSStatus purespice_process(int timeout)
   if (!atomic_load(&g_ps.connected) ||
       atomic_load(&g_ps.disconnectPending))
   {
-    purespice_finishPendingDisconnectLocked();
+    const bool finished = purespice_finishPendingDisconnectLocked();
     SPICE_UNLOCK(disconnectLock);
+    if (finished)
+      channelUSBRedir_finishShutdown();
     return PS_STATUS_SHUTDOWN;
   }
   atomic_store(&g_ps.processing, true);
@@ -645,8 +686,12 @@ PSStatus purespice_process(int timeout)
 
   if (atomic_load(&g_ps.disconnectPending))
   {
-    purespice_finishPendingDisconnectLocked();
+    const bool finished = purespice_finishPendingDisconnectLocked();
     status = PS_STATUS_SHUTDOWN;
+    SPICE_UNLOCK(disconnectLock);
+    if (finished)
+      channelUSBRedir_finishShutdown();
+    return status;
   }
   SPICE_UNLOCK(disconnectLock);
 
@@ -873,12 +918,8 @@ bool purespice_connectChannel(PSChannelType channel)
   return ps_connectChannel(ch) == PS_STATUS_OK;
 }
 
-bool purespice_disconnectChannel(PSChannelType channel)
+bool ps_disconnectChannel(PSChannel * ch)
 {
-  PSChannel * ch = getChannel(channel);
-  if (!ch)
-    return false;
-
   lockChannelConnection(ch);
   if (!atomic_load_explicit(&ch->available, memory_order_acquire))
   {
@@ -892,4 +933,13 @@ bool purespice_disconnectChannel(PSChannelType channel)
 
   unlockChannelConnection(ch);
   return true;
+}
+
+bool purespice_disconnectChannel(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return false;
+
+  return ps_disconnectChannel(ch);
 }

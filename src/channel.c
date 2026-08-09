@@ -27,6 +27,7 @@
 #include "queue.h"
 
 #include <alloca.h>
+#include <limits.h>
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,6 +35,8 @@
 #include <stdlib.h>
 
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
 #include <netinet/tcp.h>
 
 static uint64_t get_timestamp(void)
@@ -45,7 +48,7 @@ static uint64_t get_timestamp(void)
   return (uint64_t)time.tv_sec * 1000LL + time.tv_nsec / 1000000LL;
 }
 
-static void channel_internal_disconnectNL(PSChannel * channel);
+static bool channel_internal_disconnectNL(PSChannel * channel);
 
 static bool channel_sendConnectPacketNL(PSChannel * channel)
 {
@@ -307,10 +310,10 @@ PS_STATUS channel_connect(PSChannel * channel)
   return status;
 }
 
-static void channel_internal_disconnectNL(PSChannel * channel)
+static bool channel_internal_disconnectNL(PSChannel * channel)
 {
   if (!channel->connected)
-    return;
+    return false;
 
   if (channel->ready)
   {
@@ -356,21 +359,29 @@ static void channel_internal_disconnectNL(PSChannel * channel)
   channel->doDisconnect = false;
 
   PS_LOG_INFO("%s channel disconnected", channel->name);
+  return true;
 }
 
 void channel_internal_disconnect(PSChannel * channel)
 {
   SPICE_LOCK(channel->lock);
-  channel_internal_disconnectNL(channel);
+  const bool disconnected = channel_internal_disconnectNL(channel);
   SPICE_UNLOCK(channel->lock);
+
+  if (disconnected && channel->onDisconnect)
+    channel->onDisconnect(channel);
 }
 
 void channel_disconnectPending(PSChannel * channel)
 {
   SPICE_LOCK(channel->lock);
+  bool disconnected = false;
   if (channel->doDisconnect)
-    channel_internal_disconnectNL(channel);
+    disconnected = channel_internal_disconnectNL(channel);
   SPICE_UNLOCK(channel->lock);
+
+  if (disconnected && channel->onDisconnect)
+    channel->onDisconnect(channel);
 }
 
 bool channel_cancelDisconnect(PSChannel * channel)
@@ -554,6 +565,56 @@ ssize_t channel_writeNL(PSChannel * channel,
   }
 
   return result;
+}
+
+bool channel_sendMessage(PSChannel * channel, uint16_t type,
+    const void * buffer, size_t size)
+{
+  if ((!buffer && size) || size > UINT32_MAX ||
+      size > (size_t)SSIZE_MAX - sizeof(SpiceMiniDataHeader))
+    return false;
+
+  if (!atomic_load_explicit(&channel->connected, memory_order_acquire) ||
+      !atomic_load_explicit(&channel->ready, memory_order_acquire))
+    return false;
+
+  const SpiceMiniDataHeader header =
+  {
+    .type = type,
+    .size = (uint32_t)size
+  };
+
+  struct iovec iov[2] =
+  {
+    {
+      .iov_base = (void *)&header,
+      .iov_len  = sizeof(header)
+    },
+    {
+      .iov_base = (void *)buffer,
+      .iov_len  = size
+    }
+  };
+
+  const struct msghdr message =
+  {
+    .msg_iov    = iov,
+    .msg_iovlen = size ? 2 : 1
+  };
+
+  const int socket =
+    atomic_load_explicit(&channel->socket, memory_order_acquire);
+  const ssize_t result = sendmsg(socket, &message, MSG_NOSIGNAL);
+  const size_t expected = sizeof(header) + size;
+  const bool success = result >= 0 && (size_t)result == expected;
+  if (!success)
+  {
+    shutdown(socket, SHUT_RDWR);
+    atomic_store_explicit(
+        &channel->doDisconnect, true, memory_order_release);
+  }
+
+  return success;
 }
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,

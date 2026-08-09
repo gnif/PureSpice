@@ -43,6 +43,9 @@ bool channel_validateRange(const PSChannel * channel, size_t offset,
 ssize_t channel_writeNL(PSChannel * channel,
     const void * buffer, size_t size);
 
+bool channel_sendMessage(PSChannel * channel, uint16_t type,
+    const void * buffer, size_t size);
+
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
     size_t size, int * dataAvailable);
 

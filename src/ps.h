@@ -167,7 +167,9 @@ struct PSChannel
       const uint32_t * common , int numCommon,
       const uint32_t * channel, int numChannel);
   PS_STATUS   (*onConnect)(PSChannel * channel);
+  void        (*onDisconnect)(PSChannel * channel);
   PSHandlerFn (*onMessage)(PSChannel * channel);
+  void         * opaque;
 
   atomic_bool connected;
   atomic_bool ready;
@@ -251,6 +253,7 @@ struct PS
 extern PS g_ps;
 
 PS_STATUS ps_connectChannel(PSChannel * ch);
+bool ps_disconnectChannel(PSChannel * ch);
 PS_STATUS ps_bindChannel(PSChannel * ch, uint8_t id);
 void ps_unpublishChannel(PSChannel * ch);
 

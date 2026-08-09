@@ -61,6 +61,19 @@ typedef struct PSServerInfo
 }
 PSServerInfo;
 
+/* USB redirection channel handles are valid only for the PureSpice connection
+ * in which they are reported. */
+typedef struct PSUSBRedirChannel PSUSBRedirChannel;
+
+typedef enum PSUSBRedirState
+{
+  PS_USB_REDIR_AVAILABLE,
+  PS_USB_REDIR_CONNECTED,
+  PS_USB_REDIR_DISCONNECTED,
+  PS_USB_REDIR_UNAVAILABLE
+}
+PSUSBRedirState;
+
 typedef enum PSChannelType
 {
   PS_CHANNEL_MAIN,
@@ -285,6 +298,34 @@ typedef struct PSConfig
       const void * rgba, const void * andMask);
   }
   cursor;
+
+  struct
+  {
+    /* enable USB redirection support if available */
+    bool enable;
+
+    /* automatically connect to each channel as soon as it's available */
+    bool autoConnect;
+
+    /* application context passed to the callbacks below */
+    void * opaque;
+
+    /* USB redirection callbacks are serialized. Channel connect, disconnect,
+     * and write operations must be made from these callbacks or from the
+     * thread running purespice_process(). */
+
+    /* called when a USB redirection channel changes state */
+    void (*state)(PSUSBRedirChannel * channel, PSUSBRedirState state,
+        void * opaque);
+
+    /* called with a fragment of the USB redirection byte stream. A fragment
+     * does not necessarily contain a complete USB redirection packet. The
+     * data is valid only for the duration of this callback. Return false to
+     * close the channel. */
+    bool (*data)(PSUSBRedirChannel * channel, const uint8_t * data,
+        size_t size, void * opaque);
+  }
+  usbRedir;
 }
 PSConfig;
 
@@ -312,6 +353,33 @@ bool purespice_hasChannel       (PSChannelType channel);
 bool purespice_channelConnected (PSChannelType channel);
 bool purespice_connectChannel   (PSChannelType channel);
 bool purespice_disconnectChannel(PSChannelType channel);
+
+uint8_t purespice_usbRedirChannelId(
+    const PSUSBRedirChannel * channel);
+
+bool purespice_usbRedirAvailable(
+    const PSUSBRedirChannel * channel);
+
+bool purespice_usbRedirConnected(
+    const PSUSBRedirChannel * channel);
+
+bool purespice_usbRedirConnect(
+    PSUSBRedirChannel * channel);
+
+bool purespice_usbRedirDisconnect(
+    PSUSBRedirChannel * channel);
+
+void purespice_usbRedirSetOpaque(
+    PSUSBRedirChannel * channel, void * opaque);
+
+void * purespice_usbRedirGetOpaque(
+    const PSUSBRedirChannel * channel);
+
+/* Send one fragment of the USB redirection byte stream. The buffer need only
+ * remain valid until this function returns. This must be called from a USB
+ * redirection callback or from the thread running purespice_process(). */
+bool purespice_usbRedirWrite(
+    PSUSBRedirChannel * channel, const void * data, size_t size);
 
 bool purespice_keyDown      (uint32_t code);
 bool purespice_keyUp        (uint32_t code);
