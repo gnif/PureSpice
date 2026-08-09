@@ -28,7 +28,7 @@ void agent_setServerTokens(unsigned int tokens);
 
 void agent_returnServerTokens(unsigned int tokens);
 
-void agent_disconnect(void);
+void agent_disconnect(bool notifyClipboard);
 
 PS_STATUS agent_process(PSChannel * channel);
 

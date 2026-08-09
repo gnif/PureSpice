@@ -369,7 +369,7 @@ static void purespice_disconnectNow(bool wasConnected)
     g_ps.guestName = NULL;
   }
 
-  agent_disconnect();
+  agent_disconnect(false);
 
   if (wasConnected)
     PS_LOG_INFO("Disconnected");

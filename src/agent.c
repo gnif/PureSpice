@@ -42,6 +42,27 @@
 
 typedef struct PSAgent PSAgent;
 typedef struct PSAgentDeferred PSAgentDeferred;
+typedef struct PSAgentEvent PSAgentEvent;
+
+typedef enum PSAgentEventType
+{
+  PS_AGENT_EVENT_NONE,
+  PS_AGENT_EVENT_NOTICE,
+  PS_AGENT_EVENT_DATA,
+  PS_AGENT_EVENT_RELEASE,
+  PS_AGENT_EVENT_REQUEST,
+}
+PSAgentEventType;
+
+struct PSAgentEvent
+{
+  PSAgentEventType type;
+  PSDataType       dataType;
+  uint8_t *        data;
+  uint32_t         size;
+  bool             statusChanged;
+  bool             available;
+};
 
 struct PSAgentDeferred
 {
@@ -63,9 +84,14 @@ struct PSAgent
   bool               cbAgentGrabbed;
   bool               cbClientGrabbed;
   PSDataType         cbType;
+  PSDataType         cbDataType;
   uint8_t *          cbBuffer;
   uint32_t           cbRemain;
   uint32_t           cbSize;
+  bool               cbRequestPending;
+  bool               cbRequestCancelled;
+  PSDataType         cbRequestType;
+  bool               cbDataDeliver;
 
   ssize_t msgSize;
   bool    clipboardWriteActive;
@@ -84,7 +110,8 @@ static atomic_flag agentLock = ATOMIC_FLAG_INIT;
 static _Thread_local unsigned int agentLockDepth;
 
 static PS_STATUS agent_sendCaps(bool request);
-static void agent_onClipboard(void);
+static void agent_dispatchEvent(PSAgentEvent * event);
+static void agent_takeClipboardEventLocked(PSAgentEvent * event);
 static uint32_t psTypeToAgentType(PSDataType type);
 static PSDataType agentTypeToPSType(uint32_t type);
 
@@ -114,8 +141,42 @@ bool agent_present(void)
   return present;
 }
 
+static void agent_resetStateLocked(void)
+{
+  agent.cbSupported        = false;
+  agent.cbSelection        = false;
+  agent.cbAgentGrabbed     = false;
+  agent.cbClientGrabbed    = false;
+  agent.cbType             = SPICE_DATA_NONE;
+  agent.cbDataType         = SPICE_DATA_NONE;
+  agent.cbRemain           = 0;
+  agent.cbSize             = 0;
+  agent.cbRequestPending   = false;
+  agent.cbRequestCancelled = false;
+  agent.cbRequestType      = SPICE_DATA_NONE;
+  agent.cbDataDeliver      = false;
+
+  free(agent.cbBuffer);
+  agent.cbBuffer = NULL;
+
+  agent.msgSize              = 0;
+  agent.clipboardWriteActive = false;
+  agent.clipboardWriteType   = SPICE_DATA_NONE;
+
+  while(agent.deferred)
+  {
+    PSAgentDeferred * msg = agent.deferred;
+    agent.deferred = msg->next;
+    free(msg);
+  }
+  agent.deferredLast = &agent.deferred;
+}
+
 static PS_STATUS agent_connectLocked(void)
 {
+  agent.present = false;
+  agent_resetStateLocked();
+
   if (!agent.queue)
   {
     agent.queue = queue_new();
@@ -131,17 +192,6 @@ static PS_STATUS agent_connectLocked(void)
     while(queue_shift(agent.queue, &msg))
       SPICE_RAW_PACKET_FREE(msg);
   }
-
-  agent.msgSize = 0;
-  agent.clipboardWriteActive = false;
-  agent.clipboardWriteType = SPICE_DATA_NONE;
-  while(agent.deferred)
-  {
-    PSAgentDeferred * msg = agent.deferred;
-    agent.deferred = msg->next;
-    free(msg);
-  }
-  agent.deferredLast = &agent.deferred;
 
   PSChannel * channel = &g_ps.channels[PS_CHANNEL_MAIN];
   uint32_t * packet = SPICE_PACKET(SPICE_MSGC_MAIN_AGENT_START, uint32_t, 0);
@@ -167,9 +217,15 @@ static PS_STATUS agent_connectLocked(void)
 
 PS_STATUS agent_connect(void)
 {
+  PSAgentEvent event = { 0 };
   agent_lock();
+  if (agent.cbAgentGrabbed)
+    event.type = PS_AGENT_EVENT_RELEASE;
+  if (agent.cbSupported)
+    event.statusChanged = true;
   const PS_STATUS status = agent_connectLocked();
   agent_unlock();
+  agent_dispatchEvent(&event);
   return status;
 }
 
@@ -184,37 +240,21 @@ static void agent_disconnectLocked(void)
     agent.queue = NULL;
   }
 
-  if (agent.cbBuffer)
-  {
-    free(agent.cbBuffer);
-    agent.cbBuffer = NULL;
-  }
-
-  agent.cbRemain = 0;
-  agent.cbSize   = 0;
-  agent.msgSize = 0;
-  agent.clipboardWriteActive = false;
-  agent.clipboardWriteType = SPICE_DATA_NONE;
-
-  while(agent.deferred)
-  {
-    PSAgentDeferred * msg = agent.deferred;
-    agent.deferred = msg->next;
-    free(msg);
-  }
-  agent.deferredLast = &agent.deferred;
-
-  agent.cbAgentGrabbed  = false;
-  agent.cbClientGrabbed = false;
-
+  agent_resetStateLocked();
   agent.present = false;
 }
 
-void agent_disconnect(void)
+void agent_disconnect(bool notifyClipboard)
 {
+  PSAgentEvent event = { 0 };
   agent_lock();
+  if (notifyClipboard && agent.cbAgentGrabbed)
+    event.type = PS_AGENT_EVENT_RELEASE;
+  if (notifyClipboard && agent.cbSupported)
+    event.statusChanged = true;
   agent_disconnectLocked();
   agent_unlock();
+  agent_dispatchEvent(&event);
 }
 
 #pragma pack(push,1)
@@ -225,7 +265,8 @@ struct Selection
 };
 #pragma pack(pop)
 
-static PS_STATUS agent_processLocked(PSChannel * channel)
+static PS_STATUS agent_processLocked(
+    PSChannel * channel, PSAgentEvent * event)
 {
   if (agent.cbRemain)
   {
@@ -243,7 +284,7 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
     agent.cbSize   += channel->header.size;
 
     if (!agent.cbRemain)
-      agent_onClipboard();
+      agent_takeClipboardEventLocked(event);
 
     return PS_STATUS_OK;
   }
@@ -298,15 +339,34 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
       VDAgentAnnounceCapabilities * caps = (VDAgentAnnounceCapabilities *)data;
       const int capsSize = VD_AGENT_CAPS_SIZE_FROM_MSG_SIZE(msg->size);
 
-      agent.cbSupported  =
+      const bool supported =
         VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize,
             VD_AGENT_CAP_CLIPBOARD_BY_DEMAND) ||
         VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize,
             VD_AGENT_CAP_CLIPBOARD_SELECTION);
 
-      agent.cbSelection  =
+      const bool selection =
         VD_AGENT_HAS_CAPABILITY(caps->caps, capsSize,
             VD_AGENT_CAP_CLIPBOARD_SELECTION);
+
+      if (supported != agent.cbSupported)
+      {
+        event->statusChanged = true;
+        event->available     = supported;
+        if (!supported)
+        {
+          if (agent.cbAgentGrabbed)
+            event->type = PS_AGENT_EVENT_RELEASE;
+          agent.cbAgentGrabbed   = false;
+          agent.cbClientGrabbed  = false;
+          agent.cbType           = SPICE_DATA_NONE;
+          if (agent.cbRequestPending)
+            agent.cbRequestCancelled = true;
+        }
+      }
+
+      agent.cbSupported = supported;
+      agent.cbSelection = selection;
 
       if (caps->request)
         return agent_sendCaps(false);
@@ -329,16 +389,24 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
           return PS_STATUS_ERROR;
         }
 
-        data     += sizeof(struct Selection);
-        dataSize -= sizeof(struct Selection);
+        const struct Selection * selection =
+          (const struct Selection *)data;
+        data     += sizeof(*selection);
+        dataSize -= sizeof(*selection);
+
+        if (selection->selection !=
+            VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD)
+          return PS_STATUS_OK;
       }
 
       switch(msg->type)
       {
         case VD_AGENT_CLIPBOARD_RELEASE:
           agent.cbAgentGrabbed = false;
-          if (g_ps.config.clipboard.enable)
-            g_ps.config.clipboard.release();
+          agent.cbType         = SPICE_DATA_NONE;
+          if (agent.cbRequestPending)
+            agent.cbRequestCancelled = true;
+          event->type = PS_AGENT_EVENT_RELEASE;
           return PS_STATUS_OK;
 
         case VD_AGENT_CLIPBOARD:
@@ -349,8 +417,29 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          data     += sizeof(uint32_t);
-          dataSize -= sizeof(uint32_t);
+          uint32_t wireType;
+          memcpy(&wireType, data, sizeof(wireType));
+          agent.cbDataType = agentTypeToPSType(wireType);
+          if (wireType != VD_AGENT_CLIPBOARD_NONE &&
+              agent.cbDataType == SPICE_DATA_NONE)
+            PS_LOG_WARN("Unsupported agent clipboard data type: %u", wireType);
+
+          agent.cbDataDeliver = agent.cbRequestPending &&
+            !agent.cbRequestCancelled;
+          if (!agent.cbRequestPending)
+          {
+            PS_LOG_WARN("Ignoring unsolicited agent clipboard data");
+          }
+          else if (!agent.cbRequestCancelled &&
+              agent.cbDataType != SPICE_DATA_NONE &&
+              agent.cbDataType != agent.cbRequestType)
+          {
+            PS_LOG_WARN("Agent clipboard response type does not match request");
+            agent.cbDataType = SPICE_DATA_NONE;
+          }
+
+          data     += sizeof(wireType);
+          dataSize -= sizeof(wireType);
 
           if (agent.cbBuffer)
           {
@@ -378,8 +467,8 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          agent.cbBuffer = (uint8_t *)malloc(totalData);
-          if (!agent.cbBuffer)
+          agent.cbBuffer = totalData ? (uint8_t *)malloc(totalData) : NULL;
+          if (totalData && !agent.cbBuffer)
           {
             PS_LOG_ERROR("Failed to allocate buffer for clipboard transfer");
             return PS_STATUS_ERROR;
@@ -387,10 +476,11 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
 
           agent.cbSize   = dataSize;
           agent.cbRemain = totalData - dataSize;
-          memcpy(agent.cbBuffer, data, dataSize);
+          if (dataSize)
+            memcpy(agent.cbBuffer, data, dataSize);
 
           if (agent.cbRemain == 0)
-            agent_onClipboard();
+            agent_takeClipboardEventLocked(event);
 
           return PS_STATUS_OK;
         }
@@ -405,10 +495,12 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          uint32_t * type = (uint32_t *)data;
-
-          if (g_ps.config.clipboard.enable)
-            g_ps.config.clipboard.request(agentTypeToPSType(*type));
+          uint32_t wireType;
+          memcpy(&wireType, data, sizeof(wireType));
+          const PSDataType type = agentTypeToPSType(wireType);
+          event->type     = PS_AGENT_EVENT_REQUEST;
+          event->dataType = agent.cbSupported && agent.cbClientGrabbed ?
+            type : SPICE_DATA_NONE;
           return PS_STATUS_OK;
         }
 
@@ -422,23 +514,31 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
             return PS_STATUS_ERROR;
           }
 
-          uint32_t *types = (uint32_t *)data;
-
-          // there is zero documentation on the types field, it might be a
-          // bitfield but for now we are going to assume it's not.
-
-          agent.cbType          = agentTypeToPSType(types[0]);
-          agent.cbAgentGrabbed  = true;
-          agent.cbClientGrabbed = false;
-          if (agent.cbSelection)
+          if (dataSize % sizeof(uint32_t) != 0)
           {
-            // Windows doesnt support this, so until it's needed there is no point
-            // messing with it
-            return PS_STATUS_OK;
+            PS_LOG_ERROR("Agent clipboard grab has a partial data type");
+            return PS_STATUS_ERROR;
           }
 
-          if (g_ps.config.clipboard.enable)
-            g_ps.config.clipboard.notice(agent.cbType);
+          PSDataType type = SPICE_DATA_NONE;
+          for(unsigned int offset = 0;
+              offset < dataSize; offset += sizeof(uint32_t))
+          {
+            uint32_t wireType;
+            memcpy(&wireType, data + offset, sizeof(wireType));
+            type = agentTypeToPSType(wireType);
+            if (type != SPICE_DATA_NONE)
+              break;
+          }
+
+          agent.cbType           = type;
+          agent.cbAgentGrabbed   = type != SPICE_DATA_NONE;
+          agent.cbClientGrabbed  = false;
+          if (agent.cbRequestPending)
+            agent.cbRequestCancelled = true;
+          event->type     = agent.cbAgentGrabbed ?
+            PS_AGENT_EVENT_NOTICE : PS_AGENT_EVENT_RELEASE;
+          event->dataType = type;
 
           return PS_STATUS_OK;
         }
@@ -451,21 +551,74 @@ static PS_STATUS agent_processLocked(PSChannel * channel)
 
 PS_STATUS agent_process(PSChannel * channel)
 {
+  PSAgentEvent event = { 0 };
   agent_lock();
-  const PS_STATUS status = agent_processLocked(channel);
+  const PS_STATUS status = agent_processLocked(channel, &event);
   agent_unlock();
+  agent_dispatchEvent(&event);
   return status;
 }
 
-static void agent_onClipboard(void)
+static void agent_takeClipboardEventLocked(PSAgentEvent * event)
 {
-  if (g_ps.config.clipboard.enable)
-    g_ps.config.clipboard.data(agent.cbType, agent.cbBuffer, agent.cbSize);
+  if (agent.cbDataDeliver)
+  {
+    event->type     = PS_AGENT_EVENT_DATA;
+    event->dataType = agent.cbDataType;
+    if (agent.cbDataType != SPICE_DATA_NONE)
+    {
+      event->data = agent.cbBuffer;
+      event->size = agent.cbSize;
+      agent.cbBuffer  = NULL;
+    }
+  }
 
   free(agent.cbBuffer);
-  agent.cbBuffer = NULL;
-  agent.cbSize   = 0;
-  agent.cbRemain = 0;
+  agent.cbBuffer           = NULL;
+  agent.cbDataType         = SPICE_DATA_NONE;
+  agent.cbSize             = 0;
+  agent.cbRemain           = 0;
+  agent.cbRequestPending   = false;
+  agent.cbRequestCancelled = false;
+  agent.cbRequestType      = SPICE_DATA_NONE;
+  agent.cbDataDeliver      = false;
+}
+
+static void agent_dispatchEvent(PSAgentEvent * event)
+{
+  if (g_ps.config.clipboard.enable)
+  {
+    switch(event->type)
+    {
+      case PS_AGENT_EVENT_NOTICE:
+        g_ps.config.clipboard.notice(event->dataType);
+        break;
+
+      case PS_AGENT_EVENT_DATA:
+        g_ps.config.clipboard.data(
+            event->dataType, event->data, event->size);
+        break;
+
+      case PS_AGENT_EVENT_RELEASE:
+        g_ps.config.clipboard.release();
+        break;
+
+      case PS_AGENT_EVENT_REQUEST:
+        if (event->dataType != SPICE_DATA_NONE)
+          g_ps.config.clipboard.request(event->dataType);
+        else
+          purespice_clipboardDataStart(SPICE_DATA_NONE, 0);
+        break;
+
+      case PS_AGENT_EVENT_NONE:
+        break;
+    }
+
+    if (event->statusChanged && g_ps.config.clipboard.status)
+      g_ps.config.clipboard.status(event->available);
+  }
+
+  free(event->data);
 }
 
 void agent_setServerTokens(unsigned int tokens)
@@ -716,48 +869,65 @@ static PSDataType agentTypeToPSType(uint32_t type)
 
 static bool purespice_clipboardRequestLocked(PSDataType type)
 {
-  if (!agent.present)
+  if (!agent.present || !agent.cbSupported || agent.cbRequestPending)
     return false;
 
-  VDAgentClipboardRequest req;
-
-  if (!agent.cbAgentGrabbed)
+  if (!agent.cbAgentGrabbed || type != agent.cbType)
     return false;
 
-  if (type != agent.cbType)
+  const uint32_t wireType = psTypeToAgentType(type);
+  if (wireType == VD_AGENT_CLIPBOARD_NONE)
     return false;
 
-  req.type = psTypeToAgentType(type);
-  if (!agent_sendMessage(VD_AGENT_CLIPBOARD_REQUEST, &req, sizeof(req)))
+  uint8_t buffer[sizeof(struct Selection) + sizeof(wireType)] = { 0 };
+  size_t size;
+  if (agent.cbSelection)
+  {
+    buffer[0] = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
+    memcpy(buffer + sizeof(struct Selection), &wireType, sizeof(wireType));
+    size = sizeof(buffer);
+  }
+  else
+  {
+    memcpy(buffer, &wireType, sizeof(wireType));
+    size = sizeof(wireType);
+  }
+
+  if (!agent_sendMessage(VD_AGENT_CLIPBOARD_REQUEST, buffer, size))
   {
     PS_LOG_ERROR("Failed to write VD_AGENT_CLIPBOARD_REQUEST");
     return false;
   }
 
+  agent.cbRequestPending   = true;
+  agent.cbRequestCancelled = false;
+  agent.cbRequestType      = type;
   return true;
 }
 
 static bool purespice_clipboardGrabLocked(PSDataType types[], int count)
 {
-  if (!agent.present)
+  if (!agent.present || !agent.cbSupported || !types ||
+      count <= 0 || count > SPICE_DATA_NONE)
     return false;
 
-  if (count == 0)
-    return false;
+  for(int i = 0; i < count; ++i)
+    if (psTypeToAgentType(types[i]) == VD_AGENT_CLIPBOARD_NONE)
+      return false;
 
   if (agent.cbSelection)
   {
     struct Msg
     {
       uint8_t  selection;
-      uint8_t  reserved;
+      uint8_t  reserved[3];
       uint32_t types[0];
     };
 
     const int size = sizeof(struct Msg) + count * sizeof(uint32_t);
     struct Msg * msg = alloca(size);
     msg->selection = VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD;
-    msg->reserved  = 0;
+    memset(msg->reserved, 0, sizeof(msg->reserved));
     for(int i = 0; i < count; ++i)
       msg->types[i] = psTypeToAgentType(types[i]);
 
@@ -820,7 +990,8 @@ static bool purespice_clipboardReleaseLocked(void)
 static bool purespice_clipboardDataStartLocked(
     PSDataType type, size_t size)
 {
-  if (!agent.present)
+  if (!agent.present || !agent.cbSupported ||
+      (type != SPICE_DATA_NONE && !agent.cbClientGrabbed))
     return false;
 
   if (agent.clipboardWriteActive)

@@ -181,6 +181,10 @@ typedef struct PSConfig
 
     /* called to request clipboard data of the specified type */
     void (*request)(const PSDataType type);
+
+    /* [optional] called when guest agent clipboard support changes while
+     * connected. Connection shutdown is reported by purespice_process(). */
+    void (*status)(bool available);
   }
   clipboard;
 

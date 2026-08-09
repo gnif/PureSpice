@@ -285,7 +285,7 @@ static PS_STATUS onMessage_mainAgentDisconnected(struct PSChannel * channel)
 
   uint32_t error = *(uint32_t *)channel->buffer;
 
-  agent_disconnect();
+  agent_disconnect(true);
   PS_LOG_WARN("Disconnected from the spice guest agent: %u", error);
   return PS_STATUS_OK;
 }
