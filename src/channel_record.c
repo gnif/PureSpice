@@ -118,29 +118,20 @@ PSHandlerFn channelRecord_onMessage(PSChannel * channel)
 bool purespice_writeAudio(void * data, size_t size, uint32_t time)
 {
   PSChannel * channel = &g_ps.channels[PS_CHANNEL_RECORD];
-  if (!channel->connected)
-    return false;
-
-  SpiceMsgcRecordPacket * msg =
-    SPICE_PACKET(SPICE_MSGC_RECORD_DATA, SpiceMsgcRecordPacket, size);
-
-  msg->time = time;
-
-  SPICE_LOCK(channel->lock);
-  if (!SPICE_SEND_PACKET_NL(channel, msg))
+  const SpiceMsgcRecordPacket packet =
   {
-    SPICE_UNLOCK(channel->lock);
-    PS_LOG_ERROR("Failed to write SpiceMsgcRecordPacket");
+    .time = time
+  };
+
+  /* Capture delivery must never hold backend shutdown behind a busy channel
+   * or full SPICE socket. Try the lifecycle lock and use one nonblocking
+   * sendmsg; otherwise drop the packet and let the bounded queue recover. */
+  if (!SPICE_TRY_LOCK(channel->lock))
     return false;
-  }
-  const ssize_t wrote = channel_writeNL(channel, data, size);
+
+  const bool result = channel_sendMessagePartsNL(
+      channel, SPICE_MSGC_RECORD_DATA,
+      &packet, sizeof(packet), data, size, true);
   SPICE_UNLOCK(channel->lock);
-
-  if ((size_t)wrote != size)
-  {
-    PS_LOG_ERROR("Failed to write the audio data");
-    return false;
-  }
-
-  return true;
+  return result;
 }

@@ -27,6 +27,7 @@
 #include "queue.h"
 
 #include <alloca.h>
+#include <errno.h>
 #include <limits.h>
 #include <time.h>
 #include <stdio.h>
@@ -567,11 +568,17 @@ ssize_t channel_writeNL(PSChannel * channel,
   return result;
 }
 
-bool channel_sendMessage(PSChannel * channel, uint16_t type,
-    const void * buffer, size_t size)
+bool channel_sendMessagePartsNL(PSChannel * channel, uint16_t type,
+    const void * prefix, size_t prefixSize,
+    const void * data, size_t dataSize, bool nonblocking)
 {
-  if ((!buffer && size) || size > UINT32_MAX ||
-      size > (size_t)SSIZE_MAX - sizeof(SpiceMiniDataHeader))
+  if ((!prefix && prefixSize) || (!data && dataSize) ||
+      prefixSize > UINT32_MAX ||
+      dataSize > UINT32_MAX - prefixSize)
+    return false;
+
+  const size_t size = prefixSize + dataSize;
+  if (size > (size_t)SSIZE_MAX - sizeof(SpiceMiniDataHeader))
     return false;
 
   if (!atomic_load_explicit(&channel->connected, memory_order_acquire) ||
@@ -584,37 +591,64 @@ bool channel_sendMessage(PSChannel * channel, uint16_t type,
     .size = (uint32_t)size
   };
 
-  struct iovec iov[2] =
+  struct iovec iov[3] =
   {
     {
       .iov_base = (void *)&header,
       .iov_len  = sizeof(header)
-    },
-    {
-      .iov_base = (void *)buffer,
-      .iov_len  = size
     }
   };
+
+  size_t iovCount = 1;
+  if (prefixSize)
+  {
+    iov[iovCount++] = (struct iovec)
+    {
+      .iov_base = (void *)prefix,
+      .iov_len  = prefixSize
+    };
+  }
+  if (dataSize)
+  {
+    iov[iovCount++] = (struct iovec)
+    {
+      .iov_base = (void *)data,
+      .iov_len  = dataSize
+    };
+  }
 
   const struct msghdr message =
   {
     .msg_iov    = iov,
-    .msg_iovlen = size ? 2 : 1
+    .msg_iovlen = iovCount
   };
 
   const int socket =
     atomic_load_explicit(&channel->socket, memory_order_acquire);
-  const ssize_t result = sendmsg(socket, &message, MSG_NOSIGNAL);
+  const int flags = MSG_NOSIGNAL |
+    (nonblocking ? MSG_DONTWAIT : 0);
+  const ssize_t result = sendmsg(socket, &message, flags);
   const size_t expected = sizeof(header) + size;
   const bool success = result >= 0 && (size_t)result == expected;
   if (!success)
   {
+    if (nonblocking && result < 0 &&
+        (errno == EAGAIN || errno == EWOULDBLOCK))
+      return false;
+
     shutdown(socket, SHUT_RDWR);
     atomic_store_explicit(
         &channel->doDisconnect, true, memory_order_release);
   }
 
   return success;
+}
+
+bool channel_sendMessage(PSChannel * channel, uint16_t type,
+    const void * buffer, size_t size)
+{
+  return channel_sendMessagePartsNL(
+      channel, type, buffer, size, NULL, 0, false);
 }
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,

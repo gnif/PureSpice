@@ -29,6 +29,9 @@
 #define SPICE_LOCK(x) \
   while(atomic_flag_test_and_set_explicit(&(x), memory_order_acquire)) { ; }
 
+#define SPICE_TRY_LOCK(x) \
+  (!atomic_flag_test_and_set_explicit(&(x), memory_order_acquire))
+
 #define SPICE_UNLOCK(x) \
   atomic_flag_clear_explicit(&(x), memory_order_release);
 
