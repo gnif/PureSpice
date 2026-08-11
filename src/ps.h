@@ -44,6 +44,10 @@
  * unbounded allocation. */
 #define SPICE_MAX_MESSAGE_SIZE (256U * 1024U * 1024U)
 
+/* Read past the current message to amortize socket reads without copying an
+ * entire display bitmap through an intermediate buffer. */
+#define SPICE_READ_AHEAD_SIZE (16U * 1024U)
+
 /* Reserve stable storage for every possible ID of one multi-instance channel
  * type in addition to the existing singleton channels. */
 #define PS_CHANNEL_CAPACITY (PS_CHANNEL_MAX + UINT8_MAX + 1)
@@ -158,6 +162,9 @@ struct PSChannel
   uint8_t    * buffer;
   unsigned int bufferSize;
   unsigned int bufferRead;
+  uint8_t    * readAhead;
+  unsigned int readAheadOffset;
+  unsigned int readAheadSize;
   bool         discarding;
   unsigned int discardSize;
 

@@ -292,6 +292,17 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
+  channel->readAhead = malloc(SPICE_READ_AHEAD_SIZE);
+  if (!channel->readAhead)
+  {
+    channel_internal_disconnectNL(channel);
+    PS_LOG_ERROR("Failed to allocate the channel read-ahead buffer");
+    return PS_STATUS_ERROR;
+  }
+
+  channel->readAheadOffset = 0;
+  channel->readAheadSize   = 0;
+
   struct epoll_event ev =
   {
     .events   = EPOLLIN,
@@ -352,10 +363,14 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
   channel->bufferRead = 0;
   channel->headerRead = 0;
   channel->bufferSize = 0;
+  channel->readAheadOffset = 0;
+  channel->readAheadSize   = 0;
   channel->discarding = false;
   channel->discardSize = 0;
   free(channel->buffer);
   channel->buffer = NULL;
+  free(channel->readAhead);
+  channel->readAhead = NULL;
   channel->connected = false;
   channel->doDisconnect = false;
 

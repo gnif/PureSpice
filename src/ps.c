@@ -44,8 +44,9 @@
 #include <errno.h>
 #include <sched.h>
 
-#include <sys/ioctl.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
 
 #include <spice/vd_agent.h>
 
@@ -412,6 +413,270 @@ void purespice_disconnect(void)
     channelUSBRedir_finishShutdown();
 }
 
+typedef enum ChannelReadStatus
+{
+  CHANNEL_READ_MORE,
+  CHANNEL_READ_DRAINED,
+  CHANNEL_READ_DISCONNECTED,
+  CHANNEL_READ_ERROR,
+  CHANNEL_READ_ACK_ERROR,
+  CHANNEL_READ_SHUTDOWN
+}
+ChannelReadStatus;
+
+static size_t consumeReadAhead(
+    PSChannel * channel, void * dst, size_t size)
+{
+  const size_t available =
+    channel->readAheadSize - channel->readAheadOffset;
+  const size_t length = size < available ? size : available;
+  if (!length)
+    return 0;
+
+  if (dst)
+    memcpy(dst, channel->readAhead + channel->readAheadOffset, length);
+
+  channel->readAheadOffset += length;
+  if (channel->readAheadOffset == channel->readAheadSize)
+  {
+    channel->readAheadOffset = 0;
+    channel->readAheadSize   = 0;
+  }
+
+  return length;
+}
+
+static ChannelReadStatus receiveWithReadAhead(PSChannel * channel,
+    void * dst, size_t size, size_t * received)
+{
+  assert(size > 0);
+  assert(channel->readAheadSize == 0);
+
+  struct iovec iov[] =
+  {
+    {
+      .iov_base = dst,
+      .iov_len  = size
+    },
+    {
+      .iov_base = channel->readAhead,
+      .iov_len  = SPICE_READ_AHEAD_SIZE
+    }
+  };
+  struct msghdr message =
+  {
+    .msg_iov    = iov,
+    .msg_iovlen = sizeof(iov) / sizeof(iov[0])
+  };
+
+  ssize_t length;
+  do
+    length = recvmsg(channel->socket, &message, MSG_DONTWAIT);
+  while(length < 0 && errno == EINTR);
+
+  if (length == 0)
+    return CHANNEL_READ_DISCONNECTED;
+
+  if (length < 0)
+  {
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return CHANNEL_READ_DRAINED;
+
+    PS_LOG_ERROR("%s: Failed to read from the socket: %s",
+        channel->name, strerror(errno));
+    return CHANNEL_READ_ERROR;
+  }
+
+  *received = (size_t)length < size ? (size_t)length : size;
+  const size_t readAhead = (size_t)length - *received;
+  channel->readAheadOffset = 0;
+  channel->readAheadSize   = (unsigned int)readAhead;
+  return CHANNEL_READ_MORE;
+}
+
+static ChannelReadStatus receiveReadAhead(PSChannel * channel)
+{
+  assert(channel->readAheadSize == 0);
+
+  ssize_t length;
+  do
+    length = recv(channel->socket, channel->readAhead,
+        SPICE_READ_AHEAD_SIZE, MSG_DONTWAIT);
+  while(length < 0 && errno == EINTR);
+
+  if (length == 0)
+    return CHANNEL_READ_DISCONNECTED;
+
+  if (length < 0)
+  {
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return CHANNEL_READ_DRAINED;
+
+    PS_LOG_ERROR("%s: Failed to read from the socket: %s",
+        channel->name, strerror(errno));
+    return CHANNEL_READ_ERROR;
+  }
+
+  channel->readAheadOffset = 0;
+  channel->readAheadSize   = (unsigned int)length;
+  return CHANNEL_READ_MORE;
+}
+
+static ChannelReadStatus beginMessage(PSChannel * channel)
+{
+  if (channel->header.size > SPICE_MAX_MESSAGE_SIZE)
+  {
+    PS_LOG_ERROR("%s: message payload is too large (%u bytes, maximum %u)",
+        channel->name, channel->header.size, SPICE_MAX_MESSAGE_SIZE);
+    return CHANNEL_READ_ERROR;
+  }
+
+  if (!channel_ack(channel))
+  {
+    PS_LOG_ERROR("%s: Failed to send message ack", channel->name);
+    return CHANNEL_READ_ACK_ERROR;
+  }
+
+  channel->bufferRead = 0;
+  if (channel->header.type < SPICE_MSG_BASE_LAST)
+    channel->handlerFn = channel_onMessage(channel);
+  else
+    channel->handlerFn = channel->onMessage(channel);
+
+  if (atomic_load(&g_ps.disconnectPending))
+    return CHANNEL_READ_SHUTDOWN;
+
+  if (channel->handlerFn == PS_HANDLER_ERROR)
+  {
+    PS_LOG_ERROR("%s: invalid message: %d",
+        channel->name, channel->header.type);
+    return CHANNEL_READ_ERROR;
+  }
+
+  if (channel->handlerFn == PS_HANDLER_DISCARD)
+  {
+    channel->discarding  = true;
+    channel->discardSize = channel->header.size;
+    return CHANNEL_READ_MORE;
+  }
+
+  if (channel->bufferSize >= channel->header.size)
+    return CHANNEL_READ_MORE;
+
+  uint8_t * buffer = realloc(channel->buffer, channel->header.size);
+  if (!buffer)
+  {
+    PS_LOG_ERROR("out of memory");
+    return CHANNEL_READ_ERROR;
+  }
+
+  channel->buffer     = buffer;
+  channel->bufferSize = channel->header.size;
+  return CHANNEL_READ_MORE;
+}
+
+static ChannelReadStatus finishMessage(PSChannel * channel)
+{
+  channel->headerRead = 0;
+
+  const PS_STATUS status = channel->handlerFn(channel);
+  if (atomic_load(&g_ps.disconnectPending))
+    return CHANNEL_READ_SHUTDOWN;
+
+  switch(status)
+  {
+    case PS_STATUS_OK:
+    case PS_STATUS_HANDLED:
+      return CHANNEL_READ_MORE;
+
+    case PS_STATUS_NODATA:
+      return CHANNEL_READ_DISCONNECTED;
+
+    default:
+      PS_LOG_ERROR("%s: Handler reported read error", channel->name);
+      return CHANNEL_READ_ERROR;
+  }
+}
+
+static ChannelReadStatus processChannel(PSChannel * channel)
+{
+  if (channel->headerRead < sizeof(SpiceMiniDataHeader))
+  {
+    const size_t copied = consumeReadAhead(channel,
+        (uint8_t *)&channel->header + channel->headerRead,
+        sizeof(SpiceMiniDataHeader) - channel->headerRead);
+    channel->headerRead += copied;
+
+    if (channel->headerRead < sizeof(SpiceMiniDataHeader))
+    {
+      size_t received;
+      const ChannelReadStatus status = receiveWithReadAhead(channel,
+          (uint8_t *)&channel->header + channel->headerRead,
+          sizeof(SpiceMiniDataHeader) - channel->headerRead, &received);
+      if (status != CHANNEL_READ_MORE)
+        return status;
+
+      channel->headerRead += received;
+      if (channel->headerRead < sizeof(SpiceMiniDataHeader))
+        return CHANNEL_READ_MORE;
+    }
+
+    const ChannelReadStatus status = beginMessage(channel);
+    if (status != CHANNEL_READ_MORE)
+      return status;
+  }
+
+  if (channel->discarding)
+  {
+    const size_t discarded =
+      consumeReadAhead(channel, NULL, channel->discardSize);
+    channel->discardSize -= (unsigned int)discarded;
+
+    if (channel->discardSize)
+    {
+      const ChannelReadStatus status = receiveReadAhead(channel);
+      if (status != CHANNEL_READ_MORE)
+        return status;
+
+      const size_t discarded =
+        consumeReadAhead(channel, NULL, channel->discardSize);
+      channel->discardSize -= (unsigned int)discarded;
+    }
+
+    if (channel->discardSize)
+      return CHANNEL_READ_MORE;
+
+    channel->discarding = false;
+    channel->headerRead = 0;
+    return CHANNEL_READ_MORE;
+  }
+
+  if (channel->bufferRead == channel->header.size)
+    return finishMessage(channel);
+
+  const size_t copied = consumeReadAhead(channel,
+      channel->buffer + channel->bufferRead,
+      channel->header.size - channel->bufferRead);
+  channel->bufferRead += (unsigned int)copied;
+
+  if (channel->bufferRead < channel->header.size)
+  {
+    size_t received;
+    const ChannelReadStatus status = receiveWithReadAhead(channel,
+        channel->buffer + channel->bufferRead,
+        channel->header.size - channel->bufferRead, &received);
+    if (status != CHANNEL_READ_MORE)
+      return status;
+
+    channel->bufferRead += (unsigned int)received;
+  }
+
+  if (channel->bufferRead < channel->header.size)
+    return CHANNEL_READ_MORE;
+
+  return finishMessage(channel);
+}
+
 static PSStatus purespice_processInternal(int timeout)
 {
   static struct epoll_event events[PS_CHANNEL_CAPACITY];
@@ -455,197 +720,28 @@ static PSStatus purespice_processInternal(int timeout)
         continue;
 
       PSChannel * channel = (PSChannel *)events[i].data.ptr;
-
-      int dataAvailable;
-      if (ioctl(channel->socket, FIONREAD, &dataAvailable) < 0)
+      switch(processChannel(channel))
       {
-        PS_LOG_ERROR("%s: Failed to query the socket: %s",
-            channel->name, strerror(errno));
-        return PS_STATUS_ERR_READ;
-      }
+        case CHANNEL_READ_MORE:
+          continue;
 
-      // check if the socket has been disconnected
-      if (!dataAvailable)
-        goto done_disconnect;
+        case CHANNEL_READ_DRAINED:
+          ++done;
+          events[i].data.ptr = NULL;
+          continue;
 
-      // if we don't have a header yet, read it
-      if (channel->headerRead < sizeof(SpiceMiniDataHeader))
-      {
-        int       size = sizeof(SpiceMiniDataHeader)   - channel->headerRead;
-        uint8_t * dst  = ((uint8_t *)&channel->header) + channel->headerRead;
-
-        if (size > dataAvailable)
-          size = dataAvailable;
-
-        ssize_t len = read(channel->socket, dst, size);
-        if (len == 0)
+        case CHANNEL_READ_DISCONNECTED:
           goto done_disconnect;
 
-        if (len < 0)
-        {
-          PS_LOG_ERROR("%s: Failed to read from the socket: %ld",
-              channel->name, len);
-          return PS_STATUS_ERR_READ;
-        }
-
-        channel->headerRead += len;
-        dataAvailable       -= len;
-
-        // check if we have a complete header
-        if (channel->headerRead < sizeof(SpiceMiniDataHeader))
-        {
-          if (dataAvailable == 0)
-          {
-            ++done;
-            events[i].data.ptr = NULL;
-          }
-          continue;
-        }
-
-        if (channel->header.size > SPICE_MAX_MESSAGE_SIZE)
-        {
-          PS_LOG_ERROR("%s: message payload is too large (%u bytes, maximum %u)",
-              channel->name, channel->header.size, SPICE_MAX_MESSAGE_SIZE);
-          return PS_STATUS_ERR_READ;
-        }
-
-        // ack that we got the message
-        if (!channel_ack(channel))
-        {
-          PS_LOG_ERROR("%s: Failed to send message ack", channel->name);
+        case CHANNEL_READ_ACK_ERROR:
           return PS_STATUS_ERR_ACK;
-        }
 
-        channel->bufferRead = 0;
-        if (channel->header.type < SPICE_MSG_BASE_LAST)
-          channel->handlerFn = channel_onMessage(channel);
-        else
-          channel->handlerFn = channel->onMessage(channel);
-
-        if (atomic_load(&g_ps.disconnectPending))
+        case CHANNEL_READ_SHUTDOWN:
           return PS_STATUS_SHUTDOWN;
 
-        if (channel->handlerFn == PS_HANDLER_ERROR)
-        {
-          PS_LOG_ERROR("%s: invalid message: %d",
-              channel->name, channel->header.type);
+        case CHANNEL_READ_ERROR:
           return PS_STATUS_ERR_READ;
-        }
-
-        if (channel->handlerFn == PS_HANDLER_DISCARD)
-        {
-          channel->discarding  = true;
-          channel->discardSize = channel->header.size;
-        }
-        else
-        {
-          // ensure we have a large enough buffer to read the entire message
-          if (channel->bufferSize < channel->header.size)
-          {
-            uint8_t * buffer = realloc(channel->buffer, channel->header.size);
-            if (!buffer)
-            {
-              PS_LOG_ERROR("out of memory");
-              return PS_STATUS_ERR_READ;
-            }
-            channel->buffer = buffer;
-            channel->bufferSize = channel->header.size;
-          }
-        }
       }
-
-      // check if we are discarding data
-      if (channel->discarding)
-      {
-        while(channel->discardSize && dataAvailable)
-        {
-          char temp[8192];
-          unsigned int discard =
-            channel->discardSize > (unsigned int)dataAvailable ?
-            (unsigned int)dataAvailable : channel->discardSize;
-          if (discard > sizeof(temp))
-            discard = sizeof(temp);
-
-          ssize_t len = read(channel->socket, temp, discard);
-          if (len == 0)
-            goto done_disconnect;
-
-          if (len < 0)
-          {
-            PS_LOG_ERROR("%s: Failed to discard from the socket: %ld",
-                channel->name, len);
-            return PS_STATUS_ERR_READ;
-          }
-
-          dataAvailable        -= len;
-          channel->discardSize -= len;
-        }
-
-        if (!channel->discardSize)
-        {
-          channel->discarding = false;
-          channel->headerRead = 0;
-        }
-      }
-      else
-      {
-        // read the payload into the buffer
-        size_t size = channel->header.size - channel->bufferRead;
-        if (size)
-        {
-          if (size > (size_t)dataAvailable)
-            size = (size_t)dataAvailable;
-          ssize_t len = read(channel->socket,
-              channel->buffer + channel->bufferRead, size);
-
-          if (len == 0)
-            goto done_disconnect;
-
-          if (len < 0)
-          {
-            PS_LOG_ERROR("%s: Failed to read the message payload: %ld",
-                channel->name, len);
-            return PS_STATUS_ERR_READ;
-          }
-
-          dataAvailable       -= len;
-          channel->bufferRead += len;
-        }
-
-        // if we have the full payload call the channel handler to process it
-        if (channel->bufferRead == channel->header.size)
-        {
-          channel->headerRead = 0;
-
-          // process the data
-          const PS_STATUS handlerStatus = channel->handlerFn(channel);
-          if (atomic_load(&g_ps.disconnectPending))
-            return PS_STATUS_SHUTDOWN;
-
-          switch(handlerStatus)
-          {
-            case PS_STATUS_OK:
-            case PS_STATUS_HANDLED:
-              break;
-
-            case PS_STATUS_NODATA:
-              goto done_disconnect;
-
-            default:
-              PS_LOG_ERROR("%s: Handler reported read error", channel->name);
-              return PS_STATUS_ERR_READ;
-          }
-        }
-      }
-
-      // if there is no more data, we are finished processing this channel
-      if (dataAvailable == 0)
-      {
-        ++done;
-        events[i].data.ptr = NULL;
-      }
-
-      continue;
 
 done_disconnect:
       ++done;
