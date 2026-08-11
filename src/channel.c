@@ -532,8 +532,7 @@ bool channel_ack(PSChannel * channel)
 
   channel->ackCount = 0;
 
-  char * ack = SPICE_PACKET(SPICE_MSGC_ACK, char, 0);
-  *ack = 0;
+  void * ack = SPICE_RAW_PACKET(SPICE_MSGC_ACK, 0, 0);
   if (!SPICE_SEND_PACKET(channel, ack))
   {
     PS_LOG_ERROR("Failed to write ack packet");
