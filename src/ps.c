@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <errno.h>
 #include <sched.h>
@@ -456,7 +457,12 @@ static PSStatus purespice_processInternal(int timeout)
       PSChannel * channel = (PSChannel *)events[i].data.ptr;
 
       int dataAvailable;
-      ioctl(channel->socket, FIONREAD, &dataAvailable);
+      if (ioctl(channel->socket, FIONREAD, &dataAvailable) < 0)
+      {
+        PS_LOG_ERROR("%s: Failed to query the socket: %s",
+            channel->name, strerror(errno));
+        return PS_STATUS_ERR_READ;
+      }
 
       // check if the socket has been disconnected
       if (!dataAvailable)
@@ -482,10 +488,19 @@ static PSStatus purespice_processInternal(int timeout)
           return PS_STATUS_ERR_READ;
         }
 
-        // check if we have a complete header
         channel->headerRead += len;
+        dataAvailable       -= len;
+
+        // check if we have a complete header
         if (channel->headerRead < sizeof(SpiceMiniDataHeader))
+        {
+          if (dataAvailable == 0)
+          {
+            ++done;
+            events[i].data.ptr = NULL;
+          }
           continue;
+        }
 
         if (channel->header.size > SPICE_MAX_MESSAGE_SIZE)
         {
@@ -501,7 +516,6 @@ static PSStatus purespice_processInternal(int timeout)
           return PS_STATUS_ERR_ACK;
         }
 
-        dataAvailable -= len;
         channel->bufferRead = 0;
         if (channel->header.type < SPICE_MSG_BASE_LAST)
           channel->handlerFn = channel_onMessage(channel);
