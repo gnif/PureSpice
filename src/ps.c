@@ -128,6 +128,8 @@ void purespice_init(const PSInit * init)
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
   {
     g_ps.channels[i].socket = -1;
+    atomic_store_explicit(
+        &g_ps.channels[i].writeBlocked, false, memory_order_release);
     SPICE_LOCK_INIT(g_ps.channels[i].lock);
   }
   SPICE_LOCK_INIT(g_ps.mouse.lock);
@@ -720,6 +722,22 @@ static PSStatus purespice_processInternal(int timeout)
         continue;
 
       PSChannel * channel = (PSChannel *)events[i].data.ptr;
+      if (events[i].events & (EPOLLERR | EPOLLHUP))
+        goto done_disconnect;
+
+      if ((events[i].events & EPOLLOUT) &&
+          atomic_load_explicit(
+            &channel->writeBlocked, memory_order_acquire) &&
+          !channel_flushWrite(channel))
+        goto done_disconnect;
+
+      if (!(events[i].events & EPOLLIN))
+      {
+        ++done;
+        events[i].data.ptr = NULL;
+        continue;
+      }
+
       switch(processChannel(channel))
       {
         case CHANNEL_READ_MORE:
@@ -1011,6 +1029,7 @@ PSChannel * ps_allocChannel(void)
   atomic_init(&ch->connected   , false);
   atomic_init(&ch->ready       , false);
   atomic_init(&ch->doDisconnect, false);
+  atomic_init(&ch->writeBlocked, false);
   atomic_init(&ch->initDone    , false);
   atomic_init(&ch->connecting  , false);
   atomic_init(&ch->socket      , -1);

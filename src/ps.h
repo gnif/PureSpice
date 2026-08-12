@@ -48,6 +48,9 @@
  * entire display bitmap through an intermediate buffer. */
 #define SPICE_READ_AHEAD_SIZE (16U * 1024U)
 
+/* Bound asynchronous channel output if a peer stops reading. */
+#define SPICE_MAX_PENDING_WRITE_SIZE (1024U * 1024U)
+
 /* Reserve stable storage for every possible ID of one multi-instance channel
  * type in addition to the existing singleton channels. */
 #define PS_CHANNEL_CAPACITY (PS_CHANNEL_MAX + UINT8_MAX + 1)
@@ -181,9 +184,15 @@ struct PSChannel
   atomic_bool connected;
   atomic_bool ready;
   atomic_bool doDisconnect;
+  atomic_bool writeBlocked;
+  bool        nonblockingWrite;
   atomic_bool initDone;
   atomic_bool connecting;
   atomic_int  socket;
+  uint8_t    * pendingWrite;
+  size_t       pendingWriteOffset;
+  size_t       pendingWriteSize;
+  size_t       pendingWriteCapacity;
   uint32_t    ackFrequency;
   uint32_t    ackCount;
   atomic_flag lock;

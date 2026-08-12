@@ -209,15 +209,16 @@ static PSChannel * getChannel(struct PSUSBRedirChannel * state)
   if (!channel)
     return NULL;
 
-  channel->spiceType       = SPICE_CHANNEL_USBREDIR;
-  channel->name            = state->name;
-  channel->enable          = &g_ps.config.usbRedir.enable;
-  channel->autoConnect     = &g_ps.config.usbRedir.autoConnect;
-  channel->clientCapsBytes = 0;
-  channel->onConnect       = onConnect;
-  channel->onDisconnect    = onDisconnect;
-  channel->onMessage       = onMessage;
-  channel->opaque          = state;
+  channel->spiceType        = SPICE_CHANNEL_USBREDIR;
+  channel->name             = state->name;
+  channel->enable           = &g_ps.config.usbRedir.enable;
+  channel->autoConnect      = &g_ps.config.usbRedir.autoConnect;
+  channel->clientCapsBytes  = 0;
+  channel->onConnect        = onConnect;
+  channel->onDisconnect     = onDisconnect;
+  channel->onMessage        = onMessage;
+  channel->opaque           = state;
+  channel->nonblockingWrite = true;
 
   atomic_store_explicit(&state->channel, channel, memory_order_release);
   return channel;
@@ -420,11 +421,30 @@ void * purespice_usbRedirGetOpaque(
 bool purespice_usbRedirWrite(
     PSUSBRedirChannel * channel, const void * data, size_t size)
 {
+  return purespice_usbRedirWriteNonblocking(
+      channel, data, size) == (ssize_t)size;
+}
+
+ssize_t purespice_usbRedirWriteNonblocking(
+    PSUSBRedirChannel * channel, const void * data, size_t size)
+{
   if (!purespice_usbRedirConnected(channel))
-    return false;
+    return -1;
 
   PSChannel * spiceChannel =
     atomic_load_explicit(&channel->channel, memory_order_acquire);
-  return spiceChannel && channel_sendMessage(spiceChannel,
-      SPICE_MSGC_SPICEVMC_DATA, data, size);
+  return spiceChannel ? channel_sendMessageNonblocking(spiceChannel,
+      SPICE_MSGC_SPICEVMC_DATA, data, size) : -1;
+}
+
+bool purespice_usbRedirWritable(
+    const PSUSBRedirChannel * channel)
+{
+  if (!purespice_usbRedirConnected(channel))
+    return false;
+
+  const PSChannel * spiceChannel =
+    atomic_load_explicit(&channel->channel, memory_order_acquire);
+  return spiceChannel && !atomic_load_explicit(
+      &spiceChannel->writeBlocked, memory_order_acquire);
 }

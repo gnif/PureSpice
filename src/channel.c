@@ -51,6 +51,151 @@ static uint64_t get_timestamp(void)
 
 static bool channel_internal_disconnectNL(PSChannel * channel);
 
+static void channel_writeErrorNL(PSChannel * channel)
+{
+  const int socket =
+    atomic_load_explicit(&channel->socket, memory_order_acquire);
+  if (socket >= 0)
+    shutdown(socket, SHUT_RDWR);
+  atomic_store_explicit(
+      &channel->doDisconnect, true, memory_order_release);
+}
+
+static bool channel_setWriteBlockedNL(PSChannel * channel, bool blocked)
+{
+  if (atomic_load_explicit(
+        &channel->writeBlocked, memory_order_acquire) == blocked)
+    return true;
+
+  if (atomic_load_explicit(&channel->ready, memory_order_acquire))
+  {
+    const int socket =
+      atomic_load_explicit(&channel->socket, memory_order_acquire);
+    struct epoll_event event =
+    {
+      .events   = EPOLLIN | (blocked ? EPOLLOUT : 0),
+      .data.ptr = channel
+    };
+    if (socket < 0 ||
+        epoll_ctl(g_ps.epollfd, EPOLL_CTL_MOD, socket, &event) != 0)
+    {
+      channel_writeErrorNL(channel);
+      return false;
+    }
+  }
+
+  atomic_store_explicit(
+      &channel->writeBlocked, blocked, memory_order_release);
+  return true;
+}
+
+static bool channel_appendWriteNL(PSChannel * channel,
+    const void * buffer, size_t size)
+{
+  if (!size)
+    return true;
+
+  const size_t remaining =
+    channel->pendingWriteSize - channel->pendingWriteOffset;
+  if (size > SIZE_MAX - remaining)
+  {
+    channel_writeErrorNL(channel);
+    return false;
+  }
+
+  const size_t needed = remaining + size;
+  if (needed > SPICE_MAX_PENDING_WRITE_SIZE)
+  {
+    PS_LOG_ERROR("%s: pending output exceeded %zu bytes",
+        channel->name, (size_t)SPICE_MAX_PENDING_WRITE_SIZE);
+    channel_writeErrorNL(channel);
+    return false;
+  }
+
+  uint8_t * pending = channel->pendingWrite;
+  if (channel->pendingWriteOffset && remaining)
+    memmove(pending, pending + channel->pendingWriteOffset, remaining);
+
+  if (channel->pendingWriteCapacity < needed)
+  {
+    pending = realloc(pending, needed);
+    if (pending)
+      channel->pendingWriteCapacity = needed;
+  }
+  if (!pending)
+  {
+    channel_writeErrorNL(channel);
+    return false;
+  }
+
+  memcpy(pending + remaining, buffer, size);
+  channel->pendingWrite       = pending;
+  channel->pendingWriteOffset = 0;
+  channel->pendingWriteSize   = needed;
+  return channel_setWriteBlockedNL(channel, true);
+}
+
+static bool channel_flushWriteNL(PSChannel * channel)
+{
+  if (channel->pendingWriteOffset == channel->pendingWriteSize)
+    return channel_setWriteBlockedNL(channel, false);
+
+  const int socket =
+    atomic_load_explicit(&channel->socket, memory_order_acquire);
+  ssize_t result;
+  do
+  {
+    result = send(socket,
+        channel->pendingWrite + channel->pendingWriteOffset,
+        channel->pendingWriteSize - channel->pendingWriteOffset,
+        MSG_NOSIGNAL | MSG_DONTWAIT);
+  }
+  while(result < 0 && errno == EINTR);
+
+  if (result < 0)
+  {
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return true;
+
+    channel_writeErrorNL(channel);
+    return false;
+  }
+
+  if (result == 0)
+  {
+    channel_writeErrorNL(channel);
+    return false;
+  }
+
+  channel->pendingWriteOffset += (size_t)result;
+  if (channel->pendingWriteOffset < channel->pendingWriteSize)
+    return true;
+
+  channel->pendingWriteOffset = 0;
+  channel->pendingWriteSize   = 0;
+  return channel_setWriteBlockedNL(channel, false);
+}
+
+static bool channel_storeWriteRemainderNL(PSChannel * channel,
+    const SpiceMiniDataHeader * header, const void * data, size_t size,
+    size_t sent)
+{
+  const size_t headerSize = sizeof(*header);
+  uint8_t stackHeader[sizeof(*header)];
+  if (sent < headerSize)
+  {
+    const size_t headerRemaining = headerSize - sent;
+    memcpy(stackHeader, (const uint8_t *)header + sent, headerRemaining);
+    if (!channel_appendWriteNL(channel, stackHeader, headerRemaining))
+      return false;
+    sent = headerSize;
+  }
+
+  const size_t dataOffset = sent - headerSize;
+  return dataOffset >= size || channel_appendWriteNL(channel,
+      (const uint8_t *)data + dataOffset, size - dataOffset);
+}
+
 static bool channel_sendConnectPacketNL(PSChannel * channel)
 {
   typedef struct
@@ -106,6 +251,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   PS_STATUS status;
 
   channel->doDisconnect = false;
+  channel->writeBlocked = false;
   channel->initDone     = false;
   channel->ackFrequency = 0;
   channel->ackCount     = 0;
@@ -327,6 +473,8 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
   if (!channel->connected)
     return false;
 
+  bool blocked = atomic_load_explicit(
+      &channel->writeBlocked, memory_order_acquire);
   if (channel->ready)
   {
     channel->ready = false;
@@ -344,7 +492,16 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
         SpiceMsgcDisconnecting, 0);
     packet->time_stamp = get_timestamp();
     packet->reason     = SPICE_LINK_ERR_OK;
-    SPICE_SEND_PACKET_NL(channel, packet);
+    if (!blocked)
+    {
+      SpiceMiniDataHeader * header =
+        (SpiceMiniDataHeader *)((uint8_t *)packet - sizeof(*header));
+      ssize_t * size =
+        (ssize_t *)((uint8_t *)header - sizeof(*size));
+      const ssize_t sent = send(channel->socket, header, *size,
+          MSG_NOSIGNAL | MSG_DONTWAIT);
+      blocked = sent != *size;
+    }
 
     /* re-enable nodelay as this triggers a flush according to the man page */
     if (g_ps.family != AF_UNIX)
@@ -356,7 +513,7 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
   }
 
   epoll_ctl(g_ps.epollfd, EPOLL_CTL_DEL, channel->socket, NULL);
-  shutdown(channel->socket, SHUT_WR);
+  shutdown(channel->socket, blocked ? SHUT_RDWR : SHUT_WR);
   close(channel->socket);
   channel->socket = -1;
 
@@ -371,8 +528,14 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
   channel->buffer = NULL;
   free(channel->readAhead);
   channel->readAhead = NULL;
-  channel->connected = false;
-  channel->doDisconnect = false;
+  free(channel->pendingWrite);
+  channel->pendingWrite         = NULL;
+  channel->pendingWriteOffset   = 0;
+  channel->pendingWriteSize     = 0;
+  channel->pendingWriteCapacity = 0;
+  channel->writeBlocked         = false;
+  channel->connected            = false;
+  channel->doDisconnect         = false;
 
   PS_LOG_INFO("%s channel disconnected", channel->name);
   return true;
@@ -566,8 +729,37 @@ ssize_t channel_writeNL(PSChannel * channel,
   if (!buffer)
     return -1;
 
-  const ssize_t result =
-    send(channel->socket, buffer, size, MSG_NOSIGNAL);
+  if (channel->ready && atomic_load_explicit(
+        &channel->writeBlocked, memory_order_acquire))
+    return channel_appendWriteNL(channel, buffer, size) ? (ssize_t)size : -1;
+
+  const bool asyncWrite = channel->nonblockingWrite && channel->ready;
+  ssize_t result;
+  do
+    result = send(channel->socket, buffer, size, MSG_NOSIGNAL |
+        (asyncWrite ? MSG_DONTWAIT : 0));
+  while(result < 0 && errno == EINTR);
+
+  if (asyncWrite)
+  {
+    if (result < 0)
+    {
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        return channel_appendWriteNL(
+            channel, buffer, size) ? (ssize_t)size : -1;
+
+      channel_writeErrorNL(channel);
+      return -1;
+    }
+
+    if ((size_t)result < size)
+      return channel_appendWriteNL(channel,
+          (const uint8_t *)buffer + result,
+          size - (size_t)result) ? (ssize_t)size : -1;
+
+    return result;
+  }
+
   if (result < 0 || (size_t)result != size)
   {
     /*
@@ -604,6 +796,36 @@ bool channel_sendMessagePartsNL(PSChannel * channel, uint16_t type,
     .type = type,
     .size = (uint32_t)size
   };
+
+  if (atomic_load_explicit(
+        &channel->writeBlocked, memory_order_acquire))
+  {
+    if (nonblocking)
+      return false;
+
+    const size_t packetSize = sizeof(header) + size;
+    uint8_t * packet = malloc(packetSize);
+    if (!packet)
+    {
+      channel_writeErrorNL(channel);
+      return false;
+    }
+
+    memcpy(packet, &header, sizeof(header));
+    size_t offset = sizeof(header);
+    if (prefixSize)
+    {
+      memcpy(packet + offset, prefix, prefixSize);
+      offset += prefixSize;
+    }
+    if (dataSize)
+      memcpy(packet + offset, data, dataSize);
+
+    const bool result = channel_appendWriteNL(
+        channel, packet, packetSize);
+    free(packet);
+    return result;
+  }
 
   struct iovec iov[3] =
   {
@@ -663,6 +885,142 @@ bool channel_sendMessage(PSChannel * channel, uint16_t type,
 {
   return channel_sendMessagePartsNL(
       channel, type, buffer, size, NULL, 0, false);
+}
+
+ssize_t channel_sendMessageNonblocking(PSChannel * channel, uint16_t type,
+    const void * buffer, size_t size)
+{
+  if ((!buffer && size) || size > UINT32_MAX ||
+      size > (size_t)SSIZE_MAX - sizeof(SpiceMiniDataHeader))
+    return -1;
+
+  SPICE_LOCK(channel->lock);
+  if (!atomic_load_explicit(&channel->connected, memory_order_acquire) ||
+      !atomic_load_explicit(&channel->ready, memory_order_acquire))
+  {
+    SPICE_UNLOCK(channel->lock);
+    return -1;
+  }
+
+  if (channel->pendingWriteOffset < channel->pendingWriteSize &&
+      !channel_flushWriteNL(channel))
+  {
+    SPICE_UNLOCK(channel->lock);
+    return -1;
+  }
+  if (channel->pendingWriteOffset < channel->pendingWriteSize)
+  {
+    SPICE_UNLOCK(channel->lock);
+    return 0;
+  }
+
+  const SpiceMiniDataHeader header =
+  {
+    .type = type,
+    .size = (uint32_t)size
+  };
+  struct iovec iov[2] =
+  {
+    {
+      .iov_base = (void *)&header,
+      .iov_len  = sizeof(header)
+    },
+    {
+      .iov_base = (void *)buffer,
+      .iov_len  = size
+    }
+  };
+  const struct msghdr message =
+  {
+    .msg_iov    = iov,
+    .msg_iovlen = size ? 2 : 1
+  };
+
+  const int socket =
+    atomic_load_explicit(&channel->socket, memory_order_acquire);
+  ssize_t result;
+  do
+    result = sendmsg(socket, &message, MSG_NOSIGNAL | MSG_DONTWAIT);
+  while(result < 0 && errno == EINTR);
+
+  if (result < 0)
+  {
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+    {
+      const size_t packetSize = sizeof(header) + size;
+      uint8_t * packet = malloc(packetSize);
+      if (!packet)
+      {
+        channel_writeErrorNL(channel);
+        SPICE_UNLOCK(channel->lock);
+        return -1;
+      }
+
+      memcpy(packet, &header, sizeof(header));
+      if (size)
+        memcpy(packet + sizeof(header), buffer, size);
+      const bool blocked = channel_appendWriteNL(
+          channel, packet, packetSize);
+      free(packet);
+      SPICE_UNLOCK(channel->lock);
+      return blocked ? (ssize_t)size : -1;
+    }
+
+    channel_writeErrorNL(channel);
+    SPICE_UNLOCK(channel->lock);
+    return -1;
+  }
+
+  if (result == 0)
+  {
+    const size_t packetSize = sizeof(header) + size;
+    uint8_t * packet = malloc(packetSize);
+    if (!packet)
+    {
+      channel_writeErrorNL(channel);
+      SPICE_UNLOCK(channel->lock);
+      return -1;
+    }
+
+    memcpy(packet, &header, sizeof(header));
+    if (size)
+      memcpy(packet + sizeof(header), buffer, size);
+    const bool blocked = channel_appendWriteNL(
+        channel, packet, packetSize);
+    free(packet);
+    SPICE_UNLOCK(channel->lock);
+    return blocked ? (ssize_t)size : -1;
+  }
+
+  const size_t expected = sizeof(header) + size;
+  if ((size_t)result < expected &&
+      !channel_storeWriteRemainderNL(
+        channel, &header, buffer, size, (size_t)result))
+  {
+    SPICE_UNLOCK(channel->lock);
+    return -1;
+  }
+  else if ((size_t)result == expected &&
+      !channel_setWriteBlockedNL(channel, false))
+    atomic_store_explicit(
+        &channel->doDisconnect, true, memory_order_release);
+  else if ((size_t)result > expected)
+  {
+    channel_writeErrorNL(channel);
+    SPICE_UNLOCK(channel->lock);
+    return -1;
+  }
+
+  SPICE_UNLOCK(channel->lock);
+  return (ssize_t)size;
+}
+
+bool channel_flushWrite(PSChannel * channel)
+{
+  SPICE_LOCK(channel->lock);
+  const bool result = channel_flushWriteNL(channel);
+  SPICE_UNLOCK(channel->lock);
+  return result;
 }
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,

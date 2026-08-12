@@ -385,6 +385,15 @@ void * purespice_usbRedirGetOpaque(
 bool purespice_usbRedirWrite(
     PSUSBRedirChannel * channel, const void * data, size_t size);
 
+/* Nonblocking variant for use as a usbredirparser write callback. Returns the
+ * accepted or queued byte count, zero when earlier output is still pending,
+ * or -1 on error. */
+ssize_t purespice_usbRedirWriteNonblocking(
+    PSUSBRedirChannel * channel, const void * data, size_t size);
+
+bool purespice_usbRedirWritable(
+    const PSUSBRedirChannel * channel);
+
 bool purespice_keyDown      (uint32_t code);
 bool purespice_keyUp        (uint32_t code);
 bool purespice_keyModifiers (uint32_t modifiers);

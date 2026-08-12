@@ -46,9 +46,14 @@ ssize_t channel_writeNL(PSChannel * channel,
 bool channel_sendMessage(PSChannel * channel, uint16_t type,
     const void * buffer, size_t size);
 
+ssize_t channel_sendMessageNonblocking(PSChannel * channel, uint16_t type,
+    const void * buffer, size_t size);
+
 bool channel_sendMessagePartsNL(PSChannel * channel, uint16_t type,
     const void * prefix, size_t prefixSize,
     const void * data, size_t dataSize, bool nonblocking);
+
+bool channel_flushWrite(PSChannel * channel);
 
 PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
     size_t size, int * dataAvailable);
