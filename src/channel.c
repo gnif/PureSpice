@@ -28,7 +28,9 @@
 
 #include <alloca.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
@@ -50,6 +52,121 @@ static uint64_t get_timestamp(void)
 }
 
 static bool channel_internal_disconnectNL(PSChannel * channel);
+
+#ifdef PURESPICE_TESTING
+static PSTestConnectPublishedFn testConnectPublishedHook;
+static void * testConnectPublishedOpaque;
+
+void purespice_testSetConnectPublishedHook(
+    PSTestConnectPublishedFn hook, void * opaque)
+{
+  testConnectPublishedOpaque = opaque;
+  testConnectPublishedHook   = hook;
+}
+#endif
+
+static bool channel_connectCancelled(const PSChannel * channel)
+{
+  return atomic_load_explicit(
+      &g_ps.connectCancelled, memory_order_acquire) ||
+    atomic_load_explicit(
+      &channel->connectCancelled, memory_order_acquire);
+}
+
+static bool channel_publishConnectSocket(PSChannel * channel, int socketFd)
+{
+  SPICE_LOCK(channel->connectSocketLock);
+  const bool cancelled = channel_connectCancelled(channel);
+  if (!cancelled)
+  {
+    channel->connectSocket = socketFd;
+    atomic_store_explicit(&channel->socket, socketFd, memory_order_release);
+  }
+  SPICE_UNLOCK(channel->connectSocketLock);
+  return !cancelled;
+}
+
+static void channel_closeConnectSocket(PSChannel * channel, int socketFd)
+{
+  SPICE_LOCK(channel->connectSocketLock);
+  if (channel->connectSocket == socketFd)
+    channel->connectSocket = -1;
+  atomic_store_explicit(&channel->socket, -1, memory_order_release);
+  close(socketFd);
+  SPICE_UNLOCK(channel->connectSocketLock);
+}
+
+static bool channel_finishConnectSocket(PSChannel * channel, int socketFd)
+{
+  SPICE_LOCK(channel->connectSocketLock);
+  const bool cancelled = channel_connectCancelled(channel);
+  if (!cancelled && channel->connectSocket == socketFd)
+    channel->connectSocket = -1;
+  SPICE_UNLOCK(channel->connectSocketLock);
+  return !cancelled;
+}
+
+static void channel_failConnect(PSChannel * channel)
+{
+  const int socketFd = atomic_load_explicit(
+      &channel->socket, memory_order_acquire);
+  SPICE_LOCK(channel->connectSocketLock);
+  if (channel->connectSocket == socketFd)
+    channel->connectSocket = -1;
+  SPICE_UNLOCK(channel->connectSocketLock);
+  channel_internal_disconnectNL(channel);
+}
+
+#define CHANNEL_CONNECT_FAIL(channel) channel_failConnect(channel)
+
+static bool channel_connectSocket(const PSChannel * channel, int socketFd,
+    const struct sockaddr * address, socklen_t addressSize)
+{
+  enum { CANCEL_POLL_MS = 25 };
+
+  const int flags = fcntl(socketFd, F_GETFL, 0);
+  if (flags < 0 || fcntl(socketFd, F_SETFL, flags | O_NONBLOCK) != 0)
+    return false;
+
+  int result;
+  do
+    result = connect(socketFd, address, addressSize);
+  while(result != 0 && errno == EINTR &&
+      !channel_connectCancelled(channel));
+
+  if (result != 0 && errno != EINPROGRESS && errno != EALREADY)
+    return false;
+
+  while(result != 0)
+  {
+    if (channel_connectCancelled(channel))
+      return false;
+
+    struct pollfd pollFd =
+    {
+      .fd     = socketFd,
+      .events = POLLOUT,
+    };
+    do
+      result = poll(&pollFd, 1, CANCEL_POLL_MS);
+    while(result < 0 && errno == EINTR &&
+        !channel_connectCancelled(channel));
+    if (result < 0 || channel_connectCancelled(channel))
+      return false;
+    if (result == 0)
+      continue;
+
+    int error = 0;
+    socklen_t errorSize = sizeof(error);
+    if (getsockopt(socketFd, SOL_SOCKET, SO_ERROR,
+          &error, &errorSize) != 0 || error != 0)
+      return false;
+    break;
+  }
+
+  return !channel_connectCancelled(channel) &&
+    fcntl(socketFd, F_SETFL, flags) == 0;
+}
 
 static void channel_writeErrorNL(PSChannel * channel)
 {
@@ -250,6 +367,9 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
 {
   PS_STATUS status;
 
+  if (channel_connectCancelled(channel))
+    return PS_STATUS_ERROR;
+
   channel->doDisconnect = false;
   channel->writeBlocked = false;
   channel->initDone     = false;
@@ -278,26 +398,45 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
       return PS_STATUS_ERROR;
   }
 
-  channel->socket = socket(g_ps.family, SOCK_STREAM, 0);
-  if (channel->socket == -1)
+  const int socketFd = socket(g_ps.family, SOCK_STREAM, 0);
+  if (socketFd == -1)
   {
     PS_LOG_ERROR("Socket creation failed");
     return PS_STATUS_ERROR;
   }
 
+  if (!channel_publishConnectSocket(channel, socketFd))
+  {
+    close(socketFd);
+    return PS_STATUS_ERROR;
+  }
+
+#ifdef PURESPICE_TESTING
+  if (testConnectPublishedHook)
+    testConnectPublishedHook(testConnectPublishedOpaque);
+#endif
+
   if (g_ps.family != AF_UNIX)
   {
     const int flag = 1;
-    (void)setsockopt(channel->socket, IPPROTO_TCP,
+    (void)setsockopt(socketFd, IPPROTO_TCP,
         TCP_NODELAY , &flag, sizeof(int));
-    (void)setsockopt(channel->socket, IPPROTO_TCP,
+    (void)setsockopt(socketFd, IPPROTO_TCP,
         TCP_QUICKACK, &flag, sizeof(int));
   }
 
-  if (connect(channel->socket, &g_ps.addr.addr, addrSize) == -1)
+  if (!channel_connectSocket(
+        channel, socketFd, &g_ps.addr.addr, (socklen_t)addrSize))
   {
-    close(channel->socket);
+    channel_closeConnectSocket(channel, socketFd);
     PS_LOG_ERROR("Socket connect failed");
+    return PS_STATUS_ERROR;
+  }
+
+  if (channel_connectCancelled(channel))
+  {
+    shutdown(socketFd, SHUT_RDWR);
+    channel_closeConnectSocket(channel, socketFd);
     return PS_STATUS_ERROR;
   }
 
@@ -305,7 +444,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
 
   if (!channel_sendConnectPacketNL(channel))
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
@@ -314,7 +453,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if ((status = channel_readNL(channel, &header, sizeof(header),
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to read the reply to the connect packet");
     return status;
   }
@@ -322,14 +461,14 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (header.magic         != SPICE_MAGIC ||
       header.major_version != SPICE_VERSION_MAJOR)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
   if (header.size < sizeof(SpiceLinkReply))
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
     return PS_STATUS_ERROR;
   }
@@ -338,7 +477,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   // future protocol changes, so put a reaonable upper bound on it
   if (header.size > 200)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("SpiceLinkReply header size seems too large");
     return PS_STATUS_ERROR;
   }
@@ -347,13 +486,13 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if ((status = channel_readNL(channel, reply, header.size,
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     return status;
   }
 
   if (reply->error != SPICE_LINK_ERR_OK)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Server reported link error: %d", reply->error);
     return PS_STATUS_ERROR;
   }
@@ -361,7 +500,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   const size_t capsOffset = reply->caps_offset;
   if (capsOffset < sizeof(*reply) || capsOffset > header.size)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("SpiceLinkReply capability offset is outside the reply");
     return PS_STATUS_ERROR;
   }
@@ -374,7 +513,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (numCommon > capWordsAvailable ||
       numChannel > capWordsAvailable - numCommon)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("SpiceLinkReply capabilities exceed the reply");
     return PS_STATUS_ERROR;
   }
@@ -399,7 +538,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   auth.auth_mechanism = SPICE_COMMON_CAP_AUTH_SPICE;
   if (channel_writeNL(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to write the auth mechanisim packet");
     return PS_STATUS_ERROR;
   }
@@ -407,7 +546,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   PSPassword pass;
   if (!rsa_encryptPassword(reply->pub_key, g_ps.config.password, &pass))
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to encrypt the password");
     return PS_STATUS_ERROR;
   }
@@ -415,7 +554,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (channel_writeNL(channel, pass.data, pass.size) != pass.size)
   {
     rsa_freePassword(&pass);
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
@@ -426,14 +565,14 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if ((status = channel_readNL(channel, &linkResult, sizeof(linkResult),
           NULL)) != PS_STATUS_OK)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to read the authentication response");
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Server reported link error: %u", linkResult);
     return PS_STATUS_ERROR;
   }
@@ -441,7 +580,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   channel->readAhead = malloc(SPICE_READ_AHEAD_SIZE);
   if (!channel->readAhead)
   {
-    channel_internal_disconnectNL(channel);
+    CHANNEL_CONNECT_FAIL(channel);
     PS_LOG_ERROR("Failed to allocate the channel read-ahead buffer");
     return PS_STATUS_ERROR;
   }
@@ -456,9 +595,16 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   };
   epoll_ctl(g_ps.epollfd, EPOLL_CTL_ADD, channel->socket, &ev);
 
+  if (!channel_finishConnectSocket(channel, socketFd))
+  {
+    CHANNEL_CONNECT_FAIL(channel);
+    return PS_STATUS_ERROR;
+  }
   channel->ready = true;
   return PS_STATUS_OK;
 }
+
+#undef CHANNEL_CONNECT_FAIL
 
 PS_STATUS channel_connect(PSChannel * channel)
 {
@@ -466,6 +612,14 @@ PS_STATUS channel_connect(PSChannel * channel)
   const PS_STATUS status = channel_connectNL(channel);
   SPICE_UNLOCK(channel->lock);
   return status;
+}
+
+void channel_cancelConnect(PSChannel * channel)
+{
+  SPICE_LOCK(channel->connectSocketLock);
+  if (channel->connectSocket >= 0)
+    shutdown(channel->connectSocket, SHUT_RDWR);
+  SPICE_UNLOCK(channel->connectSocketLock);
 }
 
 static bool channel_internal_disconnectNL(PSChannel * channel)
@@ -514,8 +668,9 @@ static bool channel_internal_disconnectNL(PSChannel * channel)
 
   epoll_ctl(g_ps.epollfd, EPOLL_CTL_DEL, channel->socket, NULL);
   shutdown(channel->socket, blocked ? SHUT_RDWR : SHUT_WR);
-  close(channel->socket);
-  channel->socket = -1;
+  const int socketFd = atomic_exchange_explicit(
+      &channel->socket, -1, memory_order_acq_rel);
+  close(socketFd);
 
   channel->bufferRead = 0;
   channel->headerRead = 0;

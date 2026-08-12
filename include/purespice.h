@@ -346,7 +346,29 @@ extern "C" {
  */
 void purespice_init(const PSInit * init);
 
+/* Start a new connection attempt by clearing cancellation from a prior
+ * attempt. Call this before publishing the worker which will invoke
+ * purespice_connect or a channel-connect function. After cancellation, do not
+ * call it again until the cancelled attempt has returned. */
+void purespice_beginConnect(void);
 bool purespice_connect(const PSConfig * config);
+/* Interrupt connection establishment. This is safe to call from a thread
+ * other than the one running purespice_connect(). */
+void purespice_cancelConnect(void);
+
+/* Start or interrupt connection establishment for one published channel
+ * without affecting other channels in the session. */
+void purespice_beginChannelConnect(PSChannelType channel);
+void purespice_cancelChannelConnect(PSChannelType channel);
+
+#ifdef PURESPICE_TESTING
+typedef void (*PSTestConnectPublishedFn)(void * opaque);
+void purespice_testSetConnectPublishedHook(
+    PSTestConnectPublishedFn hook, void * opaque);
+#endif
+/* Disconnect the session, first interrupting any connection attempt in
+ * progress. This may be called from a thread other than the connecting
+ * thread. */
 void purespice_disconnect(void);
 PSStatus purespice_process(int timeout);
 

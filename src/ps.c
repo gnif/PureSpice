@@ -51,6 +51,8 @@
 #include <spice/vd_agent.h>
 
 static atomic_flag disconnectLock = ATOMIC_FLAG_INIT;
+static atomic_flag initialConnectLock = ATOMIC_FLAG_INIT;
+static PSChannel * getChannel(PSChannelType channel);
 
 // globals
 PS g_ps =
@@ -124,13 +126,20 @@ void purespice_init(const PSInit * init)
     memcpy(&g_ps.init, init, sizeof(*init));
 
   g_ps.epollfd = -1;
-  g_ps.channelCount = PS_CHANNEL_MAX;
+  atomic_store_explicit(
+      &g_ps.connectCancelled, false, memory_order_release);
+  atomic_store_explicit(
+      &g_ps.channelCount, PS_CHANNEL_MAX, memory_order_release);
   for(int i = PS_CHANNEL_MAX - 1; i >= 0; --i)
   {
     g_ps.channels[i].socket = -1;
     atomic_store_explicit(
+        &g_ps.channels[i].connectCancelled, false, memory_order_release);
+    atomic_store_explicit(
         &g_ps.channels[i].writeBlocked, false, memory_order_release);
     SPICE_LOCK_INIT(g_ps.channels[i].lock);
+    SPICE_LOCK_INIT(g_ps.channels[i].connectSocketLock);
+    g_ps.channels[i].connectSocket = -1;
   }
   SPICE_LOCK_INIT(g_ps.mouse.lock);
   channelUSBRedir_init();
@@ -139,11 +148,27 @@ void purespice_init(const PSInit * init)
   g_ps.initialized = true;
 }
 
+void purespice_beginConnect(void)
+{
+  if (!g_ps.initialized)
+    purespice_init(NULL);
+
+  SPICE_LOCK(initialConnectLock);
+  atomic_store_explicit(&g_ps.connectCancelled, false, memory_order_release);
+  const unsigned int channelCount = atomic_load_explicit(
+      &g_ps.channelCount, memory_order_acquire);
+  for(unsigned int i = 0; i < channelCount; ++i)
+    atomic_store_explicit(&g_ps.channels[i].connectCancelled,
+        false, memory_order_release);
+  SPICE_UNLOCK(initialConnectLock);
+}
+
 bool purespice_connect(const PSConfig * config)
 {
   if (!g_ps.initialized)
     purespice_init(NULL);
 
+  SPICE_LOCK(initialConnectLock);
   channelUSBRedir_sessionStart();
   memcpy(&g_ps.config, config, sizeof(*config));
 
@@ -310,6 +335,7 @@ bool purespice_connect(const PSConfig * config)
 
   PS_LOG_INFO("Connected");
   g_ps.connected = true;
+  SPICE_UNLOCK(initialConnectLock);
   return true;
 
 err_connect:
@@ -325,14 +351,52 @@ err_password:
   g_ps.config.password = NULL;
 
 err_host:
+  SPICE_UNLOCK(initialConnectLock);
   return false;
+}
+
+void purespice_cancelConnect(void)
+{
+  if (!g_ps.initialized)
+    return;
+
+  atomic_store_explicit(
+      &g_ps.connectCancelled, true, memory_order_release);
+  const unsigned int channelCount = atomic_load_explicit(
+      &g_ps.channelCount, memory_order_acquire);
+  for(unsigned int i = 0; i < channelCount; ++i)
+    channel_cancelConnect(&g_ps.channels[i]);
+}
+
+void purespice_beginChannelConnect(PSChannelType channel)
+{
+  if (!g_ps.initialized)
+    purespice_init(NULL);
+
+  PSChannel * ch = getChannel(channel);
+  if (ch)
+    atomic_store_explicit(
+        &ch->connectCancelled, false, memory_order_release);
+}
+
+void purespice_cancelChannelConnect(PSChannelType channel)
+{
+  PSChannel * ch = getChannel(channel);
+  if (!ch)
+    return;
+
+  atomic_store_explicit(
+      &ch->connectCancelled, true, memory_order_release);
+  channel_cancelConnect(ch);
 }
 
 static void purespice_disconnectNow(bool wasConnected)
 {
   channelUSBRedir_shutdownBegin();
 
-  for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
+  const unsigned int channelCount = atomic_load_explicit(
+      &g_ps.channelCount, memory_order_acquire);
+  for(int i = (int)channelCount - 1; i >= 0; --i)
   {
     channel_internal_disconnect(&g_ps.channels[i]);
     atomic_store_explicit(&g_ps.channels[i].available,
@@ -346,7 +410,8 @@ static void purespice_disconnectNow(bool wasConnected)
   }
 
   channelUSBRedir_shutdownEnd();
-  g_ps.channelCount = PS_CHANNEL_MAX;
+  atomic_store_explicit(
+      &g_ps.channelCount, PS_CHANNEL_MAX, memory_order_release);
 
   if (g_ps.motionBuffer)
   {
@@ -398,6 +463,9 @@ void purespice_disconnect(void)
   if (!g_ps.initialized)
     purespice_init(NULL);
 
+  purespice_cancelConnect();
+  SPICE_LOCK(initialConnectLock);
+
   /*
    * Handlers and application callbacks execute inside purespice_process().
    * Leave their channel buffers alive until the dispatcher has unwound.
@@ -413,6 +481,8 @@ void purespice_disconnect(void)
 
   if (finished)
     channelUSBRedir_finishShutdown();
+
+  SPICE_UNLOCK(initialConnectLock);
 }
 
 typedef enum ChannelReadStatus
@@ -682,9 +752,11 @@ static ChannelReadStatus processChannel(PSChannel * channel)
 static PSStatus purespice_processInternal(int timeout)
 {
   static struct epoll_event events[PS_CHANNEL_CAPACITY];
+  const unsigned int channelCount = atomic_load_explicit(
+      &g_ps.channelCount, memory_order_acquire);
 
   // check for pending disconnects
-  for(unsigned int i = 0; i < g_ps.channelCount; ++i)
+  for(unsigned int i = 0; i < channelCount; ++i)
     if (g_ps.channels[i].initDone && g_ps.channels[i].doDisconnect)
     {
       channel_disconnectPending(&g_ps.channels[i]);
@@ -692,7 +764,7 @@ static PSStatus purespice_processInternal(int timeout)
         return PS_STATUS_SHUTDOWN;
     }
 
-  int nfds = epoll_wait(g_ps.epollfd, events, g_ps.channelCount, timeout);
+  int nfds = epoll_wait(g_ps.epollfd, events, (int)channelCount, timeout);
   if (atomic_load(&g_ps.disconnectPending))
     return PS_STATUS_SHUTDOWN;
 
@@ -770,7 +842,7 @@ done_disconnect:
     }
   }
 
-  for(unsigned int i = 0; i < g_ps.channelCount; ++i)
+  for(unsigned int i = 0; i < channelCount; ++i)
     if (g_ps.channels[i].connected)
       return PS_STATUS_RUN;
 
@@ -778,7 +850,7 @@ done_disconnect:
 
   channelUSBRedir_shutdownBegin();
 
-  for(int i = (int)g_ps.channelCount - 1; i >= 0; --i)
+  for(int i = (int)channelCount - 1; i >= 0; --i)
     if (g_ps.channels[i].socket >= 0)
     {
       close(g_ps.channels[i].socket);
@@ -786,7 +858,8 @@ done_disconnect:
     }
 
   channelUSBRedir_shutdownEnd();
-  g_ps.channelCount = PS_CHANNEL_MAX;
+  atomic_store_explicit(
+      &g_ps.channelCount, PS_CHANNEL_MAX, memory_order_release);
   channelUSBRedir_finishShutdown();
   PS_LOG_INFO("Shutdown");
   return PS_STATUS_SHUTDOWN;
@@ -930,7 +1003,7 @@ static void unlockChannelConnection(PSChannel * ch)
   atomic_store_explicit(&ch->connecting, false, memory_order_release);
 }
 
-static PS_STATUS connectChannel(PSChannel * ch)
+static PS_STATUS connectChannel(PSChannel * ch, bool sessionFatal)
 {
   PS_STATUS status;
 
@@ -939,7 +1012,9 @@ static PS_STATUS connectChannel(PSChannel * ch)
 
   if ((status = channel_connect(ch)) != PS_STATUS_OK)
   {
-    purespice_disconnect();
+    if (sessionFatal && !atomic_load_explicit(
+          &g_ps.connectCancelled, memory_order_acquire))
+      purespice_disconnect();
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
     return status;
   }
@@ -947,7 +1022,10 @@ static PS_STATUS connectChannel(PSChannel * ch)
   PS_LOG_INFO("%s channel connected", ch->name);
   if (ch->onConnect && (status = ch->onConnect(ch)) != PS_STATUS_OK)
   {
-    purespice_disconnect();
+    if (sessionFatal)
+      purespice_disconnect();
+    else
+      channel_internal_disconnect(ch);
     PS_LOG_ERROR("Failed to connect to the %s channel", ch->name);
     return status;
   }
@@ -966,7 +1044,7 @@ PS_STATUS ps_connectChannel(PSChannel * ch)
     return PS_STATUS_ERROR;
   }
 
-  const PS_STATUS status = connectChannel(ch);
+  const PS_STATUS status = connectChannel(ch, false);
   unlockChannelConnection(ch);
   return status;
 }
@@ -1002,7 +1080,7 @@ PS_STATUS ps_bindChannel(PSChannel * ch, uint8_t id)
       (!ch->enable || *ch->enable) &&
       (!ch->autoConnect || *ch->autoConnect) &&
       !connected)
-    status = connectChannel(ch);
+    status = connectChannel(ch, true);
 
   unlockChannelConnection(ch);
   return status;
@@ -1017,13 +1095,15 @@ void ps_unpublishChannel(PSChannel * ch)
 
 PSChannel * ps_allocChannel(void)
 {
-  if (g_ps.channelCount >= PS_CHANNEL_CAPACITY)
+  const unsigned int channelCount = atomic_load_explicit(
+      &g_ps.channelCount, memory_order_relaxed);
+  if (channelCount >= PS_CHANNEL_CAPACITY)
   {
     PS_LOG_ERROR("The channel instance limit has been reached");
     return NULL;
   }
 
-  PSChannel * ch = &g_ps.channels[g_ps.channelCount];
+  PSChannel * ch = &g_ps.channels[channelCount];
   memset(ch, 0, sizeof(*ch));
   atomic_init(&ch->available   , false);
   atomic_init(&ch->connected   , false);
@@ -1032,9 +1112,13 @@ PSChannel * ps_allocChannel(void)
   atomic_init(&ch->writeBlocked, false);
   atomic_init(&ch->initDone    , false);
   atomic_init(&ch->connecting  , false);
+  atomic_init(&ch->connectCancelled, false);
   atomic_init(&ch->socket      , -1);
   SPICE_LOCK_INIT(ch->lock);
-  ++g_ps.channelCount;
+  SPICE_LOCK_INIT(ch->connectSocketLock);
+  ch->connectSocket = -1;
+  atomic_store_explicit(
+      &g_ps.channelCount, channelCount + 1, memory_order_release);
   return ch;
 }
 

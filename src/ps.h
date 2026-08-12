@@ -188,7 +188,10 @@ struct PSChannel
   bool        nonblockingWrite;
   atomic_bool initDone;
   atomic_bool connecting;
+  atomic_bool connectCancelled;
   atomic_int  socket;
+  atomic_flag connectSocketLock;
+  int         connectSocket;
   uint8_t    * pendingWrite;
   size_t       pendingWriteOffset;
   size_t       pendingWriteSize;
@@ -210,6 +213,7 @@ struct PS
 {
   bool     initialized;
   atomic_bool processing;
+  atomic_bool connectCancelled;
   atomic_bool disconnectPending;
   atomic_bool disconnectWasConnected;
   PSInit   init;
@@ -231,7 +235,7 @@ struct PS
 
   atomic_bool connected;
   int    epollfd;
-  unsigned int channelCount;
+  atomic_uint channelCount;
   PSChannel channels[PS_CHANNEL_CAPACITY];
   bool   channelsReady;
 

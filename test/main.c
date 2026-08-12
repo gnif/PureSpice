@@ -346,6 +346,7 @@ int main(int argc, char * argv[])
     }
   };
 
+  purespice_beginConnect();
   if (!purespice_connect(&config))
   {
     printf("spice connect failed\n");

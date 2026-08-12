@@ -22,6 +22,8 @@
 
 PS_STATUS channel_connect(PSChannel * channel);
 
+void channel_cancelConnect(PSChannel * channel);
+
 void channel_internal_disconnect(PSChannel * channel);
 
 void channel_disconnectPending(PSChannel * channel);
