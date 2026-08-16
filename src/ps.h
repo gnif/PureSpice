@@ -213,6 +213,8 @@ struct PS
 {
   bool     initialized;
   atomic_bool processing;
+  atomic_bool connectFailed;
+  atomic_bool connectRetry;
   atomic_bool connectCancelled;
   atomic_bool disconnectPending;
   atomic_bool disconnectWasConnected;

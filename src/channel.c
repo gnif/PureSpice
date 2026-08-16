@@ -119,6 +119,12 @@ static void channel_failConnect(PSChannel * channel)
 
 #define CHANNEL_CONNECT_FAIL(channel) channel_failConnect(channel)
 
+#define CHANNEL_CONNECT_ERROR(format, ...) \
+  do { \
+    if (!atomic_load_explicit(&g_ps.connectRetry, memory_order_acquire)) \
+      PS_LOG_ERROR(format, ##__VA_ARGS__); \
+  } while (0)
+
 static bool channel_connectSocket(const PSChannel * channel, int socketFd,
     const struct sockaddr * address, socklen_t addressSize)
 {
@@ -401,7 +407,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   const int socketFd = socket(g_ps.family, SOCK_STREAM, 0);
   if (socketFd == -1)
   {
-    PS_LOG_ERROR("Socket creation failed");
+    CHANNEL_CONNECT_ERROR("Socket creation failed");
     return PS_STATUS_ERROR;
   }
 
@@ -429,7 +435,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
         channel, socketFd, &g_ps.addr.addr, (socklen_t)addrSize))
   {
     channel_closeConnectSocket(channel, socketFd);
-    PS_LOG_ERROR("Socket connect failed");
+    CHANNEL_CONNECT_ERROR("Socket connect failed");
     return PS_STATUS_ERROR;
   }
 
@@ -445,7 +451,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (!channel_sendConnectPacketNL(channel))
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to write the connect packet");
+    CHANNEL_CONNECT_ERROR("Failed to write the connect packet");
     return PS_STATUS_ERROR;
   }
 
@@ -454,7 +460,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
           NULL)) != PS_STATUS_OK)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to read the reply to the connect packet");
+    CHANNEL_CONNECT_ERROR("Failed to read the reply to the connect packet");
     return status;
   }
 
@@ -462,14 +468,14 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
       header.major_version != SPICE_VERSION_MAJOR)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Invalid spice magic and or version");
+    CHANNEL_CONNECT_ERROR("Invalid spice magic and or version");
     return PS_STATUS_ERROR;
   }
 
   if (header.size < sizeof(SpiceLinkReply))
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("First message < sizeof(SpiceLinkReply)");
+    CHANNEL_CONNECT_ERROR("First message < sizeof(SpiceLinkReply)");
     return PS_STATUS_ERROR;
   }
 
@@ -478,7 +484,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (header.size > 200)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("SpiceLinkReply header size seems too large");
+    CHANNEL_CONNECT_ERROR("SpiceLinkReply header size seems too large");
     return PS_STATUS_ERROR;
   }
 
@@ -493,7 +499,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (reply->error != SPICE_LINK_ERR_OK)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Server reported link error: %d", reply->error);
+    CHANNEL_CONNECT_ERROR("Server reported link error: %d", reply->error);
     return PS_STATUS_ERROR;
   }
 
@@ -501,7 +507,8 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (capsOffset < sizeof(*reply) || capsOffset > header.size)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("SpiceLinkReply capability offset is outside the reply");
+    CHANNEL_CONNECT_ERROR(
+        "SpiceLinkReply capability offset is outside the reply");
     return PS_STATUS_ERROR;
   }
 
@@ -514,7 +521,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
       numChannel > capWordsAvailable - numCommon)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("SpiceLinkReply capabilities exceed the reply");
+    CHANNEL_CONNECT_ERROR("SpiceLinkReply capabilities exceed the reply");
     return PS_STATUS_ERROR;
   }
 
@@ -539,7 +546,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (channel_writeNL(channel, &auth, sizeof(auth)) != sizeof(auth))
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to write the auth mechanisim packet");
+    CHANNEL_CONNECT_ERROR("Failed to write the auth mechanisim packet");
     return PS_STATUS_ERROR;
   }
 
@@ -547,7 +554,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (!rsa_encryptPassword(reply->pub_key, g_ps.config.password, &pass))
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to encrypt the password");
+    CHANNEL_CONNECT_ERROR("Failed to encrypt the password");
     return PS_STATUS_ERROR;
   }
 
@@ -555,7 +562,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   {
     rsa_freePassword(&pass);
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to write the encrypted password");
+    CHANNEL_CONNECT_ERROR("Failed to write the encrypted password");
     return PS_STATUS_ERROR;
   }
 
@@ -566,14 +573,14 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
           NULL)) != PS_STATUS_OK)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to read the authentication response");
+    CHANNEL_CONNECT_ERROR("Failed to read the authentication response");
     return status;
   }
 
   if (linkResult != SPICE_LINK_ERR_OK)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Server reported link error: %u", linkResult);
+    CHANNEL_CONNECT_ERROR("Server reported link error: %u", linkResult);
     return PS_STATUS_ERROR;
   }
 
@@ -581,7 +588,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
   if (!channel->readAhead)
   {
     CHANNEL_CONNECT_FAIL(channel);
-    PS_LOG_ERROR("Failed to allocate the channel read-ahead buffer");
+    CHANNEL_CONNECT_ERROR("Failed to allocate the channel read-ahead buffer");
     return PS_STATUS_ERROR;
   }
 
@@ -605,6 +612,7 @@ static PS_STATUS channel_connectNL(PSChannel * channel)
 }
 
 #undef CHANNEL_CONNECT_FAIL
+#undef CHANNEL_CONNECT_ERROR
 
 PS_STATUS channel_connect(PSChannel * channel)
 {
@@ -1207,7 +1215,9 @@ PS_STATUS channel_readNL(PSChannel * channel, void * buffer,
     if (len < 0)
     {
       channel->connected = false;
-      PS_LOG_ERROR("Failed to read from the socket: %ld", len);
+      if (!atomic_load_explicit(&g_ps.connectRetry, memory_order_acquire) ||
+          !atomic_load_explicit(&channel->connecting, memory_order_acquire))
+        PS_LOG_ERROR("Failed to read from the socket: %ld", len);
       return PS_STATUS_ERROR;
     }
     left -= len;

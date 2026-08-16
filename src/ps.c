@@ -127,6 +127,8 @@ void purespice_init(const PSInit * init)
 
   g_ps.epollfd = -1;
   atomic_store_explicit(&g_ps.mainPingCount, 0, memory_order_release);
+  atomic_store_explicit(&g_ps.connectFailed, false, memory_order_release);
+  atomic_store_explicit(&g_ps.connectRetry, false, memory_order_release);
   atomic_store_explicit(
       &g_ps.connectCancelled, false, memory_order_release);
   atomic_store_explicit(
@@ -172,6 +174,9 @@ bool purespice_connect(const PSConfig * config)
   SPICE_LOCK(initialConnectLock);
   channelUSBRedir_sessionStart();
   atomic_store_explicit(&g_ps.mainPingCount, 0, memory_order_release);
+  atomic_store_explicit(&g_ps.connectRetry,
+      atomic_load_explicit(&g_ps.connectFailed, memory_order_acquire),
+      memory_order_release);
   memcpy(&g_ps.config, config, sizeof(*config));
 
   g_ps.config.host = (const char *)strdup(config->host);
@@ -297,7 +302,10 @@ bool purespice_connect(const PSConfig * config)
 
   if (g_ps.config.port == 0)
   {
-    PS_LOG_INFO("Connecting to unix socket %s", g_ps.config.host);
+    PS_LOG_INFO("%s to unix socket %s",
+        atomic_load_explicit(&g_ps.connectRetry, memory_order_acquire) ?
+          "Retrying connection" : "Connecting",
+        g_ps.config.host);
 
     g_ps.family = AF_UNIX;
     g_ps.addr.un.sun_family = g_ps.family;
@@ -306,7 +314,9 @@ bool purespice_connect(const PSConfig * config)
   }
   else
   {
-    PS_LOG_INFO("Connecting to socket %s:%u",
+    PS_LOG_INFO("%s to socket %s:%u",
+        atomic_load_explicit(&g_ps.connectRetry, memory_order_acquire) ?
+          "Retrying connection" : "Connecting",
         g_ps.config.host, g_ps.config.port);
 
     g_ps.family = AF_INET;
@@ -331,11 +341,15 @@ bool purespice_connect(const PSConfig * config)
 
   if (channel_connect(&g_ps.channels[0]) != PS_STATUS_OK)
   {
-    PS_LOG_ERROR("channel connect failed");
+    if (!atomic_load_explicit(&g_ps.connectRetry, memory_order_acquire))
+      PS_LOG_ERROR("channel connect failed");
+    atomic_store_explicit(&g_ps.connectFailed, true, memory_order_release);
     goto err_connect;
   }
 
   PS_LOG_INFO("Connected");
+  atomic_store_explicit(&g_ps.connectFailed, false, memory_order_release);
+  atomic_store_explicit(&g_ps.connectRetry, false, memory_order_release);
   g_ps.connected = true;
   SPICE_UNLOCK(initialConnectLock);
   return true;
