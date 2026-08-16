@@ -380,6 +380,9 @@ bool purespice_channelConnected (PSChannelType channel);
 bool purespice_connectChannel   (PSChannelType channel);
 bool purespice_disconnectChannel(PSChannelType channel);
 
+/* Number of completed server-initiated MAIN PING/PONG exchanges. */
+uint64_t purespice_mainPingCount(void);
+
 uint8_t purespice_usbRedirChannelId(
     const PSUSBRedirChannel * channel);
 

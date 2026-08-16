@@ -234,6 +234,7 @@ struct PS
   uint8_t  guestUUID[16];
 
   atomic_bool connected;
+  atomic_uint_fast64_t mainPingCount;
   int    epollfd;
   atomic_uint channelCount;
   PSChannel channels[PS_CHANNEL_CAPACITY];

@@ -795,6 +795,9 @@ static PS_STATUS onMessage_ping(PSChannel * channel)
     return PS_STATUS_ERROR;
   }
 
+  if (channel->spiceType == SPICE_CHANNEL_MAIN)
+    atomic_fetch_add_explicit(&g_ps.mainPingCount, 1, memory_order_release);
+
   return PS_STATUS_OK;
 }
 
@@ -804,8 +807,8 @@ static PS_STATUS onMessage_disconnecting(PSChannel * channel)
         channel, sizeof(SpiceMsgcDisconnecting), "DISCONNECTING"))
     return PS_STATUS_ERROR;
 
-  shutdown(channel->socket, SHUT_WR);
   PS_LOG_INFO("Server sent disconnect message");
+  purespice_disconnect();
   return PS_STATUS_HANDLED;
 }
 

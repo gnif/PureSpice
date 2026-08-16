@@ -126,6 +126,7 @@ void purespice_init(const PSInit * init)
     memcpy(&g_ps.init, init, sizeof(*init));
 
   g_ps.epollfd = -1;
+  atomic_store_explicit(&g_ps.mainPingCount, 0, memory_order_release);
   atomic_store_explicit(
       &g_ps.connectCancelled, false, memory_order_release);
   atomic_store_explicit(
@@ -170,6 +171,7 @@ bool purespice_connect(const PSConfig * config)
 
   SPICE_LOCK(initialConnectLock);
   channelUSBRedir_sessionStart();
+  atomic_store_explicit(&g_ps.mainPingCount, 0, memory_order_release);
   memcpy(&g_ps.config, config, sizeof(*config));
 
   g_ps.config.host = (const char *)strdup(config->host);
@@ -984,6 +986,11 @@ bool purespice_channelConnected(PSChannelType channel)
   if (!ch)
     return false;
   return ch->connected;
+}
+
+uint64_t purespice_mainPingCount(void)
+{
+  return atomic_load_explicit(&g_ps.mainPingCount, memory_order_acquire);
 }
 
 static void lockChannelConnection(PSChannel * ch)
