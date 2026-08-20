@@ -32,8 +32,11 @@ static PS_STATUS onMessage_inputsInit(PSChannel * channel)
   if (!channel_validatePayload(channel, sizeof(SpiceMsgInputsInit), "INPUTS_INIT"))
     return PS_STATUS_ERROR;
 
+  const SpiceMsgInputsInit * msg = (const SpiceMsgInputsInit *)channel->buffer;
+  g_ps.kb.modifiers = msg->modifiers;
+  if (g_ps.config.inputs.keyModifiers)
+    g_ps.config.inputs.keyModifiers(msg->modifiers);
   channel->initDone = true;
-  //SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
 
   return PS_STATUS_OK;
 }
@@ -44,8 +47,11 @@ static PS_STATUS onMessage_inputsKeyModifiers(PSChannel * channel)
         channel, sizeof(SpiceMsgInputsKeyModifiers), "INPUTS_KEY_MODIFIERS"))
     return PS_STATUS_ERROR;
 
-  SpiceMsgInputsInit * msg = (SpiceMsgInputsInit *)channel->buffer;
+  const SpiceMsgInputsKeyModifiers * msg =
+    (const SpiceMsgInputsKeyModifiers *)channel->buffer;
   g_ps.kb.modifiers = msg->modifiers;
+  if (g_ps.config.inputs.keyModifiers)
+    g_ps.config.inputs.keyModifiers(msg->modifiers);
   return PS_STATUS_OK;
 }
 

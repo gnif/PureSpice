@@ -162,6 +162,9 @@ typedef struct PSConfig
 
     /* automatically connect to the channel as soon as it's available */
     bool autoConnect;
+
+    /* [optional] called with the guest keyboard lock modifiers */
+    void (*keyModifiers)(uint32_t modifiers);
   }
   inputs;
 
