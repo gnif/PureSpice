@@ -780,12 +780,26 @@ static PSStatus purespice_processInternal(int timeout)
         return PS_STATUS_SHUTDOWN;
     }
 
+  if (!atomic_load_explicit(
+        &g_ps.channels[PS_CHANNEL_MAIN].connected, memory_order_acquire))
+  {
+    purespice_disconnect();
+    return PS_STATUS_SHUTDOWN;
+  }
+
   int nfds = epoll_wait(g_ps.epollfd, events, (int)channelCount, timeout);
   if (atomic_load(&g_ps.disconnectPending))
     return PS_STATUS_SHUTDOWN;
 
   if (nfds == 0 || (nfds < 0 && errno == EINTR))
-    return PS_STATUS_RUN;
+  {
+    if (atomic_load_explicit(
+          &g_ps.channels[PS_CHANNEL_MAIN].connected, memory_order_acquire))
+      return PS_STATUS_RUN;
+
+    purespice_disconnect();
+    return PS_STATUS_SHUTDOWN;
+  }
 
   if (nfds < 0)
   {
@@ -853,6 +867,11 @@ done_disconnect:
       ++done;
       events[i].data.ptr = NULL;
       channel_internal_disconnect(channel);
+      if (channel->spiceType == SPICE_CHANNEL_MAIN)
+      {
+        purespice_disconnect();
+        return PS_STATUS_SHUTDOWN;
+      }
       if (atomic_load_explicit(&g_ps.disconnectPending, memory_order_acquire))
         return PS_STATUS_SHUTDOWN;
     }
